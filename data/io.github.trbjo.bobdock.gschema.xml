@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <enum id="io.github.trbjo.bobdock.gtk-layer-shell-edge">
+    <value nick="left" value="0"/>
+    <value nick="right" value="1"/>
+    <value nick="bottom" value="3"/>
+  </enum>
+
+  <schema id="io.github.trbjo.bobdock" path="/io/github/trbjo/bobdock/">
+    <key name="css-sheet" type="s">
+      <default>''</default>
+      <summary>Custom CSS sheet</summary>
+      <description>Path to a custom CSS file for styling the launcher interface. If empty, the default stylesheet will be used. See github for the default stylesheet.</description>
+    </key>
+    <key name="auto-hide" type="b">
+      <default>false</default>
+      <summary>Whether BobDock autohides</summary>
+      <description>If true, BobDock will automatically hide when not in use.</description>
+    </key>
+    <key name="gtk-layer-shell-edge" enum="io.github.trbjo.bobdock.gtk-layer-shell-edge">
+      <default>'left'</default>
+      <summary>Layer Shell edge</summary>
+      <description>Specify which edge to use for the Layer Shell component.</description>
+    </key>
+    <key name="apps" type="as">
+      <default>[]</default>
+      <summary>Docked applications</summary>
+      <description>List of application desktop IDs to be shown in BobDock.</description>
+    </key>
+    <key name="folders" type="as">
+      <default>[]</default>
+      <summary>Docked folders</summary>
+      <description>List of folder URIs to be shown in BobDock.</description>
+    </key>
+    <key name="icon-size-range" type="(ii)">
+      <description>Icons will be scaled between these two pixel sizes. Must be between 16 and 512</description>
+      <default>(48, 128)</default>
+    </key>
+  </schema>
+</schemalist>

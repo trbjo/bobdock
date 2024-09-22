@@ -1,0 +1,13 @@
+[Unit]
+Description=BobDock
+After=graphical-session.target
+
+[Service]
+Type=exec
+ExecStart=bobdock
+
+Environment=GSK_RENDERER=vulkan # alternative renderers: gl, ngl
+Environment=GDK_BACKEND=wayland
+
+[Install]
+WantedBy=graphical-session.target
