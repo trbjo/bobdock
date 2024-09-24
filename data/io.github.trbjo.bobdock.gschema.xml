@@ -17,6 +17,16 @@
       <summary>Whether BobDock autohides</summary>
       <description>If true, BobDock will automatically hide when not in use.</description>
     </key>
+    <key name="spread-factor" type="d">
+      <default>2.0</default>
+      <summary>Spread factor</summary>
+      <description>The size of the magnification spread.</description>
+    </key>
+    <key name="scale-speed" type="i">
+      <default>150</default>
+      <summary>Scale speed</summary>
+      <description>The time in milliseconds it takes to scale up the dock.</description>
+    </key>
     <key name="gtk-layer-shell-edge" enum="io.github.trbjo.bobdock.gtk-layer-shell-edge">
       <default>'left'</default>
       <summary>Layer Shell edge</summary>

@@ -1,10 +1,4 @@
 namespace Utils {
-    public static double scale(double x, double normalized_cursor, double max_scale) {
-        double distance = Math.fabs(x - normalized_cursor);
-        double gaussian = Math.exp(-distance * distance / (2 * SPREAD_FACTOR * SPREAD_FACTOR));
-        return 1 + (max_scale - 1) * gaussian;
-    }
-
     public int round_to_nearest_even(int number) {
         return (number + 1) & ~1;
     }
@@ -159,7 +153,7 @@ namespace Utils {
         return id.has_suffix(".desktop") ? id[0:-8] : id;
     }
 
-    public static string? find_desktop_file(string app_name) {
+    public static string? find_desktop_file(string _app_id, string window_title) {
         string[] search_paths = {
             Path.build_filename(Environment.get_home_dir(), ".local", "share", "applications"),
             "/usr/local/share/applications",
@@ -169,30 +163,47 @@ namespace Utils {
         string? best_match = null;
         int best_score = -1;
 
+
+
+        // Strip ".desktop" suffix from app_id if present
+        string app_id = _app_id;
+        if (app_id.has_suffix(".desktop")) {
+            app_id = app_id.substring(0, app_id.length - 8);
+        }
+
         foreach (string path in search_paths) {
             try {
                 Dir dir = Dir.open(path, 0);
                 string? name = null;
                 while ((name = dir.read_name()) != null) {
-                    if (name.has_suffix(".desktop") && name.down().contains(app_name.down())) {
-                        string full_path = Path.build_filename(path, name);
-                        int score = score_desktop_file(full_path, app_name);
-                        if (score > best_score) {
-                            best_score = score;
-                            best_match = full_path;
-                        }
+                    if (!name.has_suffix(".desktop")) {
+                        continue;
+                    }
+                    string full_path = Path.build_filename(path, name);
+                    string base_name = name.substring(0, name.length - 8);
+                    // message("base_name: %s, app_id: %s", base_name, app_id);
+
+                    int score = score_desktop_file(full_path, base_name, app_id, window_title);
+                    if (score > best_score) {
+                        // message("Got new best match for %s: %i, app_id: %s, window_title: %s", full_path, score, app_id, window_title);
+                        best_score = score;
+                        best_match = full_path;
                     }
                 }
-            } catch (Error e) {
-                debug("Error reading directory %s: %s", path, e.message);
-            }
+            } catch (Error e) { }
         }
 
+        message("returning %s with score: %i", best_match, best_score);
         return best_match;
     }
 
-    private static int score_desktop_file(string file_path, string app_name) {
+    private static int score_desktop_file(string file_path, string base_name, string app_id, string window_title) {
         int score = 0;
+
+        if (app_id.contains(base_name)) {
+            score += 4;
+        }
+
         try {
             var key_file = new KeyFile();
             key_file.load_from_file(file_path, KeyFileFlags.NONE);
@@ -201,19 +212,26 @@ namespace Utils {
             string? icon = key_file.get_string("Desktop Entry", "Icon");
             string? name = key_file.get_string("Desktop Entry", "Name");
 
-            if (exec != null && exec.down().contains(app_name.down())) {
+            if (exec != null && exec.down().contains(app_id.down())) {
                 score += 2;
             }
-            if (icon != null && icon.down().contains(app_name.down())) {
+            if (icon != null && icon.down().contains(app_id.down())) {
                 score += 1;
             }
-            if (name != null && name.down().contains(app_name.down())) {
-                score += 3;
+            if (name != null) {
+                if (name.down().contains(app_id.down())) {
+                    score += 3;
+                }
+                if (window_title != "" && name.down().contains(window_title.down())) {
+                    score += 4;
+                }
             }
         } catch (Error e) {
-            warning("Error reading desktop file %s: %s", file_path, e.message);
+            // ignore missing icon warning
+            // warning("Error reading desktop file %s: %s", file_path, e.message);
         }
-        return score;
+
+        return score > 0 ? score : -1;
     }
 
     public static bool array_contains(string[] lst, string needle) {

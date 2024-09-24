@@ -210,7 +210,7 @@ public class DockWindow : Gtk.Window {
         var scroll_controller = new Gtk.EventControllerScroll(Gtk.EventControllerScrollFlags.VERTICAL);
         scroll_controller.scroll.connect((dx, dy) => {
             if (!content_popover.visible) {
-                settings.max_scale += (dy < 0 ? -SCALE_STEP : SCALE_STEP);
+                settings.max_icon_size += (dy < 0 ? -1 : 1);
             }
             return true;
         });

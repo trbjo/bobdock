@@ -1,4 +1,6 @@
 public class Dock : Gtk.Widget {
+    private const double MIN_SCALE = 1.0;
+
     private static AppSettings settings = AppSettings.get_default();
 
     public Background background { get; construct; }
@@ -12,7 +14,6 @@ public class Dock : Gtk.Widget {
 
     public signal void scaled_up();
 
-    private int64 last_frame_time;
     private uint animation_callback_id = 0;
 
     public double current_scale = 1.0;
@@ -31,8 +32,6 @@ public class Dock : Gtk.Widget {
         trash.dock_item_removed.connect(remove);
         splitter.folder_dropped.connect(add_folder_item);
     }
-
-
 
     public int foreach_visible(ItemFunc func) {
         int visible_count = 0;
@@ -259,7 +258,7 @@ public class Dock : Gtk.Widget {
         window_map.foreach((key, win) => {
             if (win.get_parent() == null) {
                 win.insert_after(this, background);
-                win.animate_icon(true, null);
+                // win.animate_icon(true, null);
             }
         });
 
@@ -279,85 +278,32 @@ public class Dock : Gtk.Widget {
 
     private void start_animation() {
         if (animation_callback_id == 0) {
-            last_frame_time = get_frame_clock().get_frame_time();
             animation_callback_id = add_tick_callback(animate_tick);
-
         }
-    }
-
-    private const double P0 = 0.00;
-    private const double P1 = 0.49;
-    private const double P2 = 0.51;
-    private const double P3 = 1.0;
-
-    private double bezier_ease(double t) {
-        double u = 1 - t;
-        double tt = t * t;
-        double uu = u * u;
-        double uuu = uu * u;
-        double ttt = tt * t;
-
-        return (uuu * P0) + (3 * uu * t * P1) + (3 * u * tt * P2) + (ttt * P3);
     }
 
     private bool scaling_up = true;
 
     private bool animate_tick(Gtk.Widget widget, Gdk.FrameClock frame_clock) {
-        int64 now = frame_clock.get_frame_time();
-        int64 frame_delta = now - last_frame_time;
-        if (frame_delta == 0) {
-            frame_delta = 1;
-        }
-        last_frame_time = now;
-
-        double total_steps = (ZOOM_ANIMATION_MILLISECONDS * 1000 / frame_delta);
+        var monitor = Gdk.Display.get_default().get_monitor_at_surface(get_root().get_surface());
         double scale_delta = settings.max_scale - MIN_SCALE;
-        if (scale_delta == 0) {
-            animation_callback_id = 0;
-            return false;
-        }
 
-        double point = scaling_up
-            ? (current_scale - MIN_SCALE) / scale_delta
-            : (settings.max_scale - current_scale) / scale_delta;
-
-        point = point.clamp(0.0, 1.0);
-
-        double next_point = point + (1.0 / total_steps);
-        next_point = next_point.clamp(0.0, 1.0);
-
-        double eased_progress = bezier_ease(next_point);
-        // message("next_point: %f, eased_progress:%f", next_point ,eased_progress);
-
-        if (scaling_up) {
-            current_scale = double.max(current_scale+0.01, MIN_SCALE + eased_progress * scale_delta);
-        } else {
-            current_scale = double.min(current_scale-0.01, settings.max_scale - eased_progress * scale_delta);
-        }
-
+        current_scale += scale_delta / (settings.scale_speed * monitor.refresh_rate / 1000.0) * (scaling_up ? 1 : -1);
         current_scale = current_scale.clamp(MIN_SCALE, settings.max_scale);
 
-        double tolerance = 0.02 * (settings.max_scale - MIN_SCALE);
-        bool should_continue = Math.fabs(current_scale - (scaling_up ? settings.max_scale : MIN_SCALE)) > tolerance;
-
-        if (!should_continue) {
-            current_scale = scaling_up ? settings.max_scale : MIN_SCALE;
+        if (current_scale >= settings.max_scale || current_scale <= MIN_SCALE) {
             animation_callback_id = 0;
         }
 
         queue_resize();
-        return should_continue;
+        return animation_callback_id != 0;
     }
 
     private double last_cursor;
 
     public void request_motion(double outside_pos) {
         last_cursor = outside_pos;
-        if (animation_callback_id != 0) {
-            return;
-        }
-
-        if (current_scale == MIN_SCALE) {
+        if (current_scale != settings.max_scale) {
             scale_up();
         } else {
             queue_resize();
@@ -366,26 +312,26 @@ public class Dock : Gtk.Widget {
 
 
     private void set_icon_targets(double baseline_percentage, double for_scale, int ideal_size_for_scale, int base_size) {
-        double baseline_cursor =  baseline_percentage*item_count;
-        int max_icon_size = (int)Math.floor((((double)base_size)*settings.max_scale));
-
         int accumulated_sizes = 0;
         List<unowned DockItem> item_list = new List<unowned DockItem>();
-        foreach_visible((item, i) => {
-            double icon_center = i++ + 0.5;
-            double scale_factor = Utils.scale(icon_center, baseline_cursor, for_scale);
-            scale_factor = scale_factor.clamp(MIN_SCALE, settings.max_scale);
-            int icon_size = (int)Math.floor(base_size * scale_factor);
-            icon_size = icon_size.clamp(base_size, max_icon_size);
 
+        double spread_inverse = 100.0 / settings.spread_factor;
+        double scale_factor = for_scale - 1.0;
+
+        foreach_visible((item, i) => {
+            double icon_center_percentage = ((double)(i + 0.5)) / ((double)item_count);
+            double distance = icon_center_percentage - baseline_percentage;
+            double item_scale = 1.0 + scale_factor * Math.exp(-distance * distance * spread_inverse);
+
+            int icon_size = (int)Math.floor(base_size * item_scale);
             item.icon_size = icon_size;
-            accumulated_sizes+=icon_size;
+            accumulated_sizes += icon_size;
             item_list.append(item);
         });
 
         int sizediff = accumulated_sizes - ideal_size_for_scale;
         int adjustment = sizediff > 0 ? -1 : 1;
-        bool can_distribute = sizediff != 0 && (max_icon_size - base_size) * item_count > sizediff.abs();
+        bool can_distribute = sizediff != 0;
 
         item_list.sort((a, b) => (a.icon_size - b.icon_size));
         while (can_distribute) {
@@ -396,7 +342,7 @@ public class Dock : Gtk.Widget {
                     return;
                 }
 
-                if (base_size < item.icon_size < max_icon_size) {
+                if (base_size < item.icon_size) {
                     item.icon_size += adjustment;
                     sizediff += adjustment;
                     can_distribute = true;
@@ -441,12 +387,20 @@ public class Dock : Gtk.Widget {
         background.image_size.measure(Gtk.Orientation.HORIZONTAL, -1, out base_size, null, null, null);
         int padding = (int)Math.round(primary_min_size + dock_padding - item_count*base_size);
 
-        double max_size_for_scale = get_expansion(0.5, current_scale, base_size);
-        double ideal_size_for_scale = get_expansion(baseline_percentage, current_scale, base_size);
+        double nearest_center = get_edge_favoring_icon_percentage(baseline_percentage);
+
+        double max_scale = get_expansion_factor(0.5, current_scale);
+        double ideal_scale = get_expansion_factor(baseline_percentage, current_scale);
+        double extreme_scale = get_expansion_factor(nearest_center, current_scale);
+
+        ideal_scale = double.max(ideal_scale, extreme_scale);
+        double max_size_for_scale = ((double)base_size) * max_scale;
+        double ideal_size_for_scale = ((double)base_size) * ideal_scale;
+
+        double scale_difference = max_scale - ideal_scale;
+        int deficit = (int)Math.round(((double)base_size) * scale_difference);
 
         int background_total_size = (int)Math.round(ideal_size_for_scale);
-        int deficit = (int)Math.round(max_size_for_scale - ideal_size_for_scale);
-
         if (baseline_percentage > 0.5) {
             deficit = 0;
         } else {
@@ -454,7 +408,7 @@ public class Dock : Gtk.Widget {
         }
 
         set_icon_targets(baseline_percentage, current_scale, background_total_size, base_size);
-        background_total_size+=padding;
+        background_total_size += padding;
 
         int fixed_transform = (int)Math.round((base_dimension - max_size_for_scale - padding)/2.0);
         int x_offset = is_bottom ? (fixed_transform + deficit) : 0;
@@ -528,6 +482,7 @@ public class Dock : Gtk.Widget {
             item.measure(Gtk.Orientation.VERTICAL, -1, null, out nat_v, null, null);
             item.allocate(nat_h, nat_v, baseline, trans(nat_h, nat_v));
         });
+
     }
 
     public override void snapshot(Gtk.Snapshot snapshot) {
@@ -535,22 +490,44 @@ public class Dock : Gtk.Widget {
         snapshot_child(background, snapshot);
         foreach_visible((item, index) => visible_items.append(item));
         visible_items.sort((a, b) => (a.icon_size - b.icon_size));
-        foreach (var child in visible_items) {
+        foreach(var child in visible_items) {
             snapshot_child(child, snapshot);
         }
     }
 
-    public double get_expansion(double cursor_percentage, double max_scale, int base_size) {
-        double total_size = 0;
-        double baseline_cursor = item_count*cursor_percentage;
-        double base_icon_size = (double)base_size;
+    public double get_expansion_factor(double cursor_percentage, double max_scale) {
+        double spread_inverse = 100.0 / settings.spread_factor;
+        double scale_factor = max_scale - 1.0;
+        double total_factor = 0;
+
         for (int i = 0; i < item_count; i++) {
-            double icon_center = i + 0.5;
-            double scale_factor = double.max(1.0, Utils.scale(icon_center, baseline_cursor, max_scale));
-            double icon_size = base_icon_size * scale_factor;
-            total_size += icon_size;
+            double distance = ((double)i + 0.5) / item_count - cursor_percentage;
+            total_factor += 1.0 + scale_factor * Math.exp(-distance * distance * spread_inverse);
         }
-        return total_size;
+
+        return total_factor;
+    }
+
+    public double get_edge_favoring_icon_percentage(double cursor_percentage) {
+        int item_count = this.item_count;
+
+        if (cursor_percentage <= 0.5 / item_count) {
+            return 0.0; // First icon
+        }
+        if (cursor_percentage >= (item_count - 0.5) / item_count) {
+            return 1.0; // Last icon
+        }
+
+        double adjusted_cursor = cursor_percentage * item_count - 0.5;
+
+        int nearest_icon;
+        if (cursor_percentage < 0.5) {
+            nearest_icon = (int)Math.floor(adjusted_cursor);
+        } else {
+            nearest_icon = (int)Math.ceil(adjusted_cursor);
+        }
+
+        return (nearest_icon + 0.5) / item_count;
     }
 
     public int bg_inner_size() {

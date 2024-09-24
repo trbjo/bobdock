@@ -60,7 +60,7 @@ public class SwayConnector : Object, IDesktopConnector {
             return apps.get(swaywindow.app_id);
         }
 
-        string path = Utils.find_desktop_file(swaywindow.app_id);
+        string path = Utils.find_desktop_file(swaywindow.app_id, swaywindow.name ?? "");
         if (path == null) {
             return null;
         }
@@ -110,6 +110,8 @@ public class SwayConnector : Object, IDesktopConnector {
                     container_to_app_id.insert(event.container.id, event.container.app_id);
                     window_item.add_window(event.container.id);
                     update_apps();
+                } else {
+                    warning("could not create window_item for app: %s", event.container.app_id);
                 }
                 break;
             case SwayIPCClient.WindowChange.CLOSE:
@@ -146,7 +148,7 @@ public class SwayConnector : Object, IDesktopConnector {
                 break;
         }
 
-        // debug("event.change: %s, app: %s", event.change.to_string(), event.container.app_id);
+        debug("event.change: %s, app: %s", event.change.to_string(), event.container.app_id);
     }
 
     private void add_existing_apps(SwayIPCClient.Tree tree) {

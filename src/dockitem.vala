@@ -9,14 +9,7 @@ public interface MouseAble : GLib.Object {
 }
 
 public abstract class DockItem : Gtk.Widget, MouseAble {
-    private float bounce_progress = 0.0f;
-
     protected BadgeWidget badge;
-
-    private int64 icon_start_time = 0;
-    private float icon_animation_progress = 1.0f;
-    private uint icon_animation_id = 0;
-    private bool is_icon_fading_out = false;
 
     private const float MAX_BOUNCE_SCALE = 1.2f;
 
@@ -111,40 +104,6 @@ public abstract class DockItem : Gtk.Widget, MouseAble {
     }
 
 
-    public delegate void AnimationCompletedFunc();
-
-    public void animate_icon(bool fade_in, owned AnimationCompletedFunc? completed_func = null) {
-        is_icon_fading_out = !fade_in;
-        icon_start_time = get_frame_clock().get_frame_time();
-
-        if (icon_animation_id != 0) {
-            remove_tick_callback(icon_animation_id);
-            icon_animation_id = 0;
-        }
-
-        icon_animation_id = add_tick_callback((widget, frame_clock) => {
-            int64 now = frame_clock.get_frame_time();
-            double t = (double)(now - icon_start_time) / (ANIMATION_MILLISECONDS * 1000);
-
-            if (t >= 1.0) {
-                icon_animation_progress = is_icon_fading_out ? 0.0f : 1.0f;
-                this.queue_draw();
-                icon_animation_id = 0;
-                if (completed_func != null) {
-                    completed_func();
-                }
-                return false;
-            }
-
-            // Ease in-out function
-            t = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
-
-            icon_animation_progress = is_icon_fading_out ? (float)(1.0 - t) : (float)t;
-            this.queue_draw();
-            return true;
-        });
-    }
-
     public override void size_allocate(int width, int height, int baseline) {
         base.size_allocate(width, height, baseline);
 
@@ -172,19 +131,6 @@ public abstract class DockItem : Gtk.Widget, MouseAble {
     }
 
     public override void snapshot(Gtk.Snapshot snapshot) {
-        snapshot.save();
-
-        float icon_scale = icon_animation_progress * (1 + bounce_progress * (MAX_BOUNCE_SCALE - 1));
-
-        float center_x = (((float)icon_size) / 2.0f);
-        float center_y = (((float)icon_size) / 2.0f);
-
-        snapshot.translate(Graphene.Point.zero());
-        snapshot.translate({center_x, center_y});
-        snapshot.scale(icon_scale, icon_scale);
-        snapshot.translate({ - center_x, - center_y });
-
         icon.paintable.snapshot(snapshot, icon_size, icon_size);
-        snapshot.restore();
     }
 }

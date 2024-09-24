@@ -1,13 +1,3 @@
-const double MIN_SCALE = 1.0;
-const double SCALE_STEP = 0.1;
-const int MIN_SIZE = 16;
-const int MAX_SIZE = 512;
-
-const double SPREAD_FACTOR = 1.2; // Controls how quickly the effect falls off
-
-const int ANIMATION_MILLISECONDS = 300;
-const int ZOOM_ANIMATION_MILLISECONDS = 150;
-
 const string BOBDOCK_APP_ID = "io.github.trbjo.bobdock";
 const string BOBDOCK_OBJECT_PATH = "/io/github/trbjo/bobdock";
 

@@ -10,6 +10,9 @@ namespace WayLauncherStyleProvider {
 }
 
 public class AppSettings : GLib.Object {
+    const int MIN_SIZE = 16;
+    const int MAX_SIZE = 512;
+
     private static AppSettings? instance;
     public GLib.Settings settings;
 
@@ -36,6 +39,12 @@ public class AppSettings : GLib.Object {
         switch (key) {
             case "gtk-layer-shell-edge":
                 update_gtk_layer_shell_edge();
+                break;
+            case "spread-factor":
+                update_spread_factor();
+                break;
+            case "scale-speed":
+                update_scale_speed();
                 break;
             case "auto-hide":
                 update_auto_hide();
@@ -78,6 +87,20 @@ public class AppSettings : GLib.Object {
 
     private int _min_icon_size;
     private int _max_icon_size;
+    private double _spread_factor;
+    public double spread_factor { get { return _spread_factor; } }
+
+    private double _scale_speed;
+    public double scale_speed { get { return _scale_speed; } }
+
+    protected void update_spread_factor() {
+        _spread_factor = (double)settings.get_double("spread-factor");
+    }
+
+    protected void update_scale_speed() {
+        // convert to seconds
+        _scale_speed = ((double)settings.get_int("scale-speed")) / 1000.0;
+    }
 
     private int min_icon_size {
         get {
@@ -98,7 +121,7 @@ public class AppSettings : GLib.Object {
         }
     }
 
-    private int max_icon_size {
+    public int max_icon_size {
         get {
             return _max_icon_size;
         }
@@ -116,13 +139,6 @@ public class AppSettings : GLib.Object {
     public double max_scale {
         get {
             return ((double)_max_icon_size) / ((double)min_icon_size);;
-        }
-        set {
-            int scaled_to_pixel = (int)Math.round(value * ((double)min_icon_size));
-            scaled_to_pixel = scaled_to_pixel.clamp(min_icon_size, MAX_SIZE);
-            if (_max_icon_size != scaled_to_pixel) {
-                max_icon_size = scaled_to_pixel;
-            }
         }
     }
 
@@ -219,6 +235,8 @@ public class AppSettings : GLib.Object {
         update_dock_apps();
         update_dock_folders();
         update_icon_size_range();
+        update_spread_factor();
+        update_scale_speed();
     }
 
     protected void update_css_sheet() {
@@ -334,7 +352,7 @@ public class AppSettings : GLib.Object {
     public GLib.List<AppItem> get_app_items() {
         GLib.List<AppItem> items = new GLib.List<AppItem>();
         foreach (string app_id in _dock_apps) {
-            string? file_info = Utils.find_desktop_file(app_id);
+            string? file_info = Utils.find_desktop_file(app_id, "");
             if (file_info != null) {
                 items.append(new AppItem(new DesktopAppInfo.from_filename(file_info)));
             }
