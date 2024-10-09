@@ -42,7 +42,7 @@ public class Splitter : Item, WidgetHandler {
             hash: "Splitter".hash()
         );
         css_classes = {"splitter"};
-        visible = true;
+        visible = false;
         this.dock = dock;
         this.set_parent(dock);
         dock.state_flags_changed.connect(this.on_state_flags_changed);

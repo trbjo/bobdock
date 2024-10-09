@@ -91,11 +91,13 @@ public abstract class Item : Gtk.Widget, IDockClick {
         bool was_drop_target = (old_flags & Gtk.StateFlags.DROP_ACTIVE) != 0;
 
         if (!was_drop_target && is_drop_target) {
-            PopupManager.get_default().handle_hover_for(this);
+            PopupManager.get_default().hover_enter_for(this);
+        } else if (was_drop_target && !is_drop_target) {
+            PopupManager.get_default().hover_leave_for(this);
         } else if (!was_prelight && is_prelight) {
-            PopupManager.get_default().handle_hover_for(this);
-        } else if (!is_prelight) {
-            PopupManager.get_default().handle_hover_leave();
+            PopupManager.get_default().hover_enter_for(this);
+        } else if (was_prelight && !is_prelight) {
+            PopupManager.get_default().hover_leave_for(this);
         }
     }
 

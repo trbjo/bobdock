@@ -92,14 +92,18 @@ public class Dock : Gtk.Widget {
         unowned Gtk.Widget child = background;
         while (child != trash) {
             child = child.get_next_sibling();
-            func((Item)child);
+            if (child.visible) {
+                func((Item)child);
+            }
         }
     }
 
     public void foreach_item_rev(ItemFunc func) {
         unowned Gtk.Widget child = trash;
         while (child != background) {
-            func((Item)child);
+            if (child.visible) {
+                func((Item)child);
+            }
             child = child.get_prev_sibling();
         }
     }
@@ -369,7 +373,7 @@ public class Dock : Gtk.Widget {
             pixel_accumulator += icon_size_diff;
             int pixel_change = (int)Math.round(pixel_accumulator);
 
-            if (pixel_change != 0) {
+            if (pixel_change != 0 && icon_size_int > settings.min_icon_size) {
                 icon_size_int += pixel_change;
                 pixel_accumulator -= pixel_change;
             }
@@ -398,7 +402,7 @@ public class Dock : Gtk.Widget {
         dock_height += (is_bottom ? icon_padding + settings.min_icon_size : acc_sizes);
         dock_width += (is_bottom ? acc_sizes : icon_padding + settings.min_icon_size);
 
-        double translate_down = direction * (max_sizes - acc_sizes);
+        double translate_down = direction * (max_sizes - acc_sizes - pixel_accumulator);
 
         float fixed_transform = (float)(base_dimension - (is_bottom ? dock_width : dock_height) - translate_down)/2.0f;
 

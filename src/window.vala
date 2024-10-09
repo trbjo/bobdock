@@ -352,7 +352,7 @@ public class DockWindow : Gtk.Window {
 
         switch (controller) {
             case DROP_LEAVE:
-                popup_manager.handle_hover_leave();
+                popup_manager.hover_leave_for(null);
                 dock.scale_down();
                 items_unset_state_flags(Gtk.StateFlags.DROP_ACTIVE | Gtk.StateFlags.INSENSITIVE);
                 widget_controller.unset_state_flags(Gtk.StateFlags.DROP_ACTIVE);
@@ -360,7 +360,7 @@ public class DockWindow : Gtk.Window {
                 break;
             case HOVER_LEAVE:
                 dock.scale_down();
-                popup_manager.handle_hover_leave();
+                popup_manager.hover_leave_for(null);
                 break;
             case POPUP:
                 dock_drag.set_state(Gtk.EventSequenceState.DENIED);
@@ -386,7 +386,6 @@ public class DockWindow : Gtk.Window {
                 this.get_surface().set_cursor(new Gdk.Cursor.from_name("default", null));
 
                 widget_controller.unset_state_flags(Gtk.StateFlags.DROP_ACTIVE);
-                // popup_manager.handle_hover_leave();
                 break;
             case ITEM:
                 dock_drag.set_state(Gtk.EventSequenceState.DENIED);
@@ -399,7 +398,7 @@ public class DockWindow : Gtk.Window {
             case DOCK:
                 dock.sensitive = false;
                 dock.scale_down();
-                popup_manager.handle_hover_leave();
+                popup_manager.hover_leave_for(null);
 
                 this.get_surface().set_cursor(new Gdk.Cursor.from_name("grab", null));
 

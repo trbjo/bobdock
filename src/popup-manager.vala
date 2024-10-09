@@ -191,11 +191,12 @@ public class PopupManager : Gtk.Popover {
         popup_opened(folder_item);
     }
 
-    public void handle_hover_leave() {
+    public void hover_leave_for(Item? item) {
         if (in_popup_mode()) {
             return;
         }
-        if (parent != null) {
+
+        if (parent != null && (item == parent || item == null)) {
             this.visible = false;
         }
     }
@@ -212,7 +213,7 @@ public class PopupManager : Gtk.Popover {
         }
     }
 
-    public void handle_hover_for(Item item) {
+    public void hover_enter_for(Item item) {
         if (in_popup_mode()) {
             return;
         }
