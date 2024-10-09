@@ -1,5 +1,7 @@
-public class FolderItem : DockItem, MouseAble {
-    public string path { get; private set; }
+public class FolderItem : Item, IUserItem {
+    public static Type TYPE = typeof(FolderItem);
+
+    public string user_id { get; construct; }
     private const int MAX_OVERLAY_ITEMS = 3;
     private File folder;
     private FileMonitor folder_monitor;
@@ -22,21 +24,28 @@ public class FolderItem : DockItem, MouseAble {
         }
     }
 
-    protected override void dispose() {
-        foreach (var thumb in thumbnail_widgets) {
-            thumb.unparent();
+    public override bool movable
+    {
+        get {
+            return true;
         }
-        base.dispose();
     }
 
 
     public FolderItem(string label, string uri) {
 
         var folder = File.new_for_uri(uri);
-        var path = folder.get_basename();
+        var path = folder.get_path();
+        string icon_name = get_folder_icon_name(folder);
+        var folder_icon = new FolderIcon(icon_name);
 
-        Object(user_identification: uri, label: label, icon_name: get_folder_icon_name(folder));
-        this.path = path;
+        Object(
+            label: label,
+            user_id: uri,
+            icon: folder_icon,
+            hash: "FolderItem".hash() ^ uri.hash()
+        );
+        folder_icon.add_parent(this);
 
         this.folder = folder;
         this.recent_files = new HashTable<string, FileInfo>(str_hash, str_equal);
@@ -47,13 +56,19 @@ public class FolderItem : DockItem, MouseAble {
         setup_folder_monitor();
         update_nice_boxes();
         this.is_dir = (GLib.FileUtils.test(path, GLib.FileTest.IS_DIR));
+        this.add_css_class("folder");
+        add_css_class(label);
     }
 
-    protected override bool can_handle_mime_type(File file, string mime_type) {
+    public override bool handle_click(int n_press) {
+        return true;
+    }
+
+    public override bool can_handle_mime_type(File file, string mime_type) {
         File? parent = file.get_parent();
         if (parent != null) {
             string? parent_path = parent.get_path();
-            if (parent_path != null && parent_path == this.path) {
+            if (parent_path != null && parent_path == this.user_id) {
                 return false;
             }
         }
@@ -61,9 +76,9 @@ public class FolderItem : DockItem, MouseAble {
     }
 
 
-    private static string get_folder_icon_name(File _folder) {
+    private static string get_folder_icon_name(File file) {
         try {
-            var info = _folder.query_info("standard::icon", FileQueryInfoFlags.NONE);
+            var info = file.query_info("standard::icon", FileQueryInfoFlags.NONE);
             var icon = info.get_icon();
             if (icon is ThemedIcon) {
                 var themed_icon = (ThemedIcon) icon;
@@ -98,47 +113,37 @@ public class FolderItem : DockItem, MouseAble {
         return null;
     }
 
-    public override void size_allocate(int width, int height, int baseline) {
-        int max_length = int.min(MAX_OVERLAY_ITEMS, (int)thumbnail_widgets.length());
-        for (int i = 0; i < max_length; i++) {
-            unowned Thumbnails.ThumbnailContainer thumbnail = thumbnail_widgets.nth_data(i);
-            thumbnail.allocate(_icon_size, _icon_size, baseline, null);
+    private class FolderIcon : Icon {
+        private unowned FolderItem parent_item;
+
+        public FolderIcon(string icon_name) {
+            Object(icon_name: icon_name);
         }
-        base.size_allocate(width, height, baseline);
+
+        public void add_parent(FolderItem parent) {
+            this.parent_item = parent;
+        }
+
+        public override void size_allocate(int width, int height, int baseline) {
+            base.size_allocate(width, height, baseline);
+            // thumbnail_widgets belongs to the parent!
+            int max_length = int.min(MAX_OVERLAY_ITEMS, (int)parent_item.thumbnail_widgets.length());
+            for (int i = 0; i < max_length; i++) {
+                unowned Thumbnails.ThumbnailContainer thumbnail = parent_item.thumbnail_widgets.nth_data(i);
+                thumbnail.allocate(width, width, baseline, null);
+            }
+        }
+
+        public override void snapshot(Gtk.Snapshot snapshot) {
+            base.snapshot(snapshot);
+            int max_length = int.min(MAX_OVERLAY_ITEMS, (int)parent_item.thumbnail_widgets.length());
+            for (int i = 0; i < max_length; i++) {
+                unowned Thumbnails.ThumbnailContainer child = parent_item.thumbnail_widgets.nth_data(i);
+                snapshot_child(child, snapshot);
+            }
+        }
     }
 
-    public override void snapshot(Gtk.Snapshot snapshot) {
-        base.snapshot(snapshot);
-        snapshot.save();
-
-        int max_length = int.min(MAX_OVERLAY_ITEMS, (int)thumbnail_widgets.length());
-        const float random_range = 10.0f;
-        int clockwise = 1;
-
-        for (int i = 0; i < max_length; i++) {
-            unowned Thumbnails.ThumbnailContainer child = thumbnail_widgets.nth_data(i);
-
-            string file_name = child.file.get_basename();
-            uint32 hash = file_name.hash();
-            float hash_based_adjustment = (float)(hash % 1000) / 1000.0f * 2 * random_range - random_range;
-            hash_based_adjustment.clamp(-15, 15);
-            clockwise *= -1;
-            hash_based_adjustment *= clockwise;
-
-            snapshot.save();
-            int width = child.get_width();
-            int height = child.get_height();
-
-            snapshot.translate({ width / 2, height / 2 });
-            snapshot.rotate(hash_based_adjustment);
-            snapshot.translate({ -width / 2, -height / 2 });
-
-            snapshot_child(child, snapshot);
-
-            snapshot.restore();
-        }
-        snapshot.restore();
-    }
 
     private string ATTRIBUTES = FileAttribute.STANDARD_NAME + "," +
                      FileAttribute.TIME_MODIFIED + "," +
@@ -168,10 +173,6 @@ public class FolderItem : DockItem, MouseAble {
         } catch (Error e) {
             warning("Failed to set up folder monitor: %s", e.message);
         }
-    }
-
-    public override bool handle_click() {
-        return true;
     }
 
     private void on_directory_changed(File file, File? other_file, FileMonitorEvent event_type) {
@@ -284,7 +285,7 @@ public class FolderItem : DockItem, MouseAble {
                     var thumbnail_widget_copy = factory.create_thumbnail(paintable, file, is_thumbnail, scale_factor);
                     thumbnail_widget_copy.can_target = false;
                     thumbnail_widgets.append(thumbnail_widget_copy);
-                    thumbnail_widget_copy.set_parent(this);
+                    thumbnail_widget_copy.set_parent(icon);
                 }
             }
 
@@ -309,7 +310,7 @@ public class FolderItem : DockItem, MouseAble {
             queue_draw();
             return true;
         } catch (Error e) {
-            warning("Failed to move file %s to folder %s: %s", file.get_path(), path, e.message);
+            warning("Failed to move file %s to folder %s: %s", file.get_path(), user_id, e.message);
         }
         return false;
     }

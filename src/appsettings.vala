@@ -11,7 +11,7 @@ namespace WayLauncherStyleProvider {
 
 public class AppSettings : GLib.Object {
     const int MIN_SIZE = 16;
-    const int MAX_SIZE = 512;
+    const int MAX_SIZE = 256;
 
     private static AppSettings? instance;
     public GLib.Settings settings;
@@ -28,7 +28,7 @@ public class AppSettings : GLib.Object {
         update_all();
     }
 
-    public static AppSettings get_default() {
+    public static unowned AppSettings get_default() {
         if (instance == null) {
             instance = new AppSettings();
         }
@@ -43,6 +43,9 @@ public class AppSettings : GLib.Object {
             case "spread-factor":
                 update_spread_factor();
                 break;
+            case "hover-label-max-length":
+                update_hover_label_max_length();
+                break;
             case "scale-speed":
                 update_scale_speed();
                 break;
@@ -53,30 +56,76 @@ public class AppSettings : GLib.Object {
                 update_css_sheet();
                 break;
             case "icon-size-range":
-                update_icon_size_range();
+                update_icon_size_range_from_settings();
                 break;
             case "apps":
                 update_dock_apps();
-                dock_apps_changed();
                 break;
             case "folders":
                 update_dock_folders();
-                dock_folders_changed();
                 break;
         }
     }
 
-    protected void update_icon_size_range() {
+    protected void update_icon_size_range_from_settings() {
         Variant variant = settings.get_value("icon-size-range");
         if (variant.is_of_type(new VariantType("(ii)"))) {
             int min, max;
             variant.get("(ii)", out min, out max);
             if (min > max) {
                 warning("minimum icon size (%i) can't be larger than maximum (%i)", min, max);
-                min = max;
             }
-            max_icon_size = max;
-            min_icon_size = min;
+            set_icon_sizes(min, max);
+        }
+    }
+
+    protected void set_icon_sizes(int min, int max) {
+        int old_min = _min_icon_size;
+        int old_max = _max_icon_size;
+        bool min_emit_change = min != min_icon_size;
+        bool max_emit_change = max != max_icon_size;
+
+        min = min.clamp(MIN_SIZE, MAX_SIZE);
+        max = max.clamp(MIN_SIZE, MAX_SIZE);
+        int adjusted_min = int.min(min, MAX_SIZE);
+        bool max_follow_min = max <= _min_icon_size;
+        int adjusted_max = 0;
+        if (max_follow_min) {
+            // adjusted_max = adjusted_min;
+        } else {
+        }
+            adjusted_max = int.max(adjusted_min, max);
+
+        _min_icon_size = adjusted_min;
+        _max_icon_size = adjusted_max;
+
+        if (min_emit_change || max_emit_change) {
+            sizes_changed(old_min, old_max);
+            settings.set_value("icon-size-range", new Variant("(ii)", adjusted_min, adjusted_max));
+        }
+    }
+
+    private int _max_icon_size;
+    public int max_icon_size {
+        get {
+            return _max_icon_size;
+        }
+        set {
+            if (_max_icon_size != value) {
+                set_icon_sizes(min_icon_size, value);
+            }
+        }
+    }
+    private int _min_icon_size;
+
+    public int min_icon_size {
+        get {
+            return _min_icon_size;
+        }
+        set {
+            if (_min_icon_size != value) {
+                set_icon_sizes(value, max_icon_size);
+            }
         }
     }
 
@@ -85,8 +134,6 @@ public class AppSettings : GLib.Object {
         MAX = 1
     }
 
-    private int _min_icon_size;
-    private int _max_icon_size;
     private double _spread_factor;
     public double spread_factor { get { return _spread_factor; } }
 
@@ -97,50 +144,30 @@ public class AppSettings : GLib.Object {
         _spread_factor = (double)settings.get_double("spread-factor");
     }
 
+    public signal void hover_label_max_length_changed(int max_width);
+    private int _hover_label_max_length;
+    public int hover_label_max_length {
+        get {
+            return _hover_label_max_length;
+        }
+        set {
+            if (value != _hover_label_max_length) {
+                _hover_label_max_length = value;
+                hover_label_max_length_changed(_hover_label_max_length);
+            }
+
+        }
+    }
+    protected void update_hover_label_max_length() {
+        hover_label_max_length = settings.get_int("hover-label-max-length");
+    }
+
     protected void update_scale_speed() {
         // convert to seconds
         _scale_speed = ((double)settings.get_int("scale-speed")) / 1000.0;
     }
 
-    private int min_icon_size {
-        get {
-            return _min_icon_size;
-        }
-        set {
-            if (_min_icon_size != value && MIN_SIZE <= value <= max_icon_size) {
-                _min_icon_size = value;
-                string css = get_css_icon_size(_min_icon_size);
-                icon_size_provider.load_from_string(css);
-                WayLauncherStyleProvider.add_style_context(
-                    Gdk.Display.get_default(),
-                    icon_size_provider,
-                    Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
-                );
-                settings.set_value("icon-size-range", new Variant("(ii)", value, max_icon_size));
-            }
-        }
-    }
-
-    public int max_icon_size {
-        get {
-            return _max_icon_size;
-        }
-        set {
-            if (_max_icon_size != value && min_icon_size <= value <= MAX_SIZE) {
-                _max_icon_size = value;
-                double max_scale = ((double)_max_icon_size) / ((double)min_icon_size);
-                settings.set_value("icon-size-range", new Variant("(ii)", min_icon_size, value));
-                scale_factor_changed(max_scale);
-            }
-        }
-    }
-
-    public signal void scale_factor_changed(double scale);
-    public double max_scale {
-        get {
-            return ((double)_max_icon_size) / ((double)min_icon_size);;
-        }
-    }
+    public signal void sizes_changed(int old_min, int old_max);
 
     public signal void autohide_changed(bool hide);
     private bool _auto_hide = false;
@@ -172,12 +199,8 @@ public class AppSettings : GLib.Object {
     }
 
     private FileMonitor? file_monitor;
-    private Gtk.CssProvider? css_provider;
-    private static Gtk.CssProvider icon_size_provider;
+    private Gtk.CssProvider? css_edges;
 
-    static construct {
-        icon_size_provider = new Gtk.CssProvider();
-    }
 
     private void update_css() {
         if (file_monitor != null) {
@@ -186,37 +209,37 @@ public class AppSettings : GLib.Object {
             file_monitor = null;
         }
 
-        if (css_provider != null) {
-            WayLauncherStyleProvider.remove_style_context(Gdk.Display.get_default(), css_provider);
-            css_provider = null;
+        if (css_edges != null) {
+            WayLauncherStyleProvider.remove_style_context(Gdk.Display.get_default(), css_edges);
+            css_edges = null;
         }
 
-        css_provider = new Gtk.CssProvider();
+        css_edges = new Gtk.CssProvider();
 
         if (FileUtils.test(this._css_path, FileTest.EXISTS)) {
             try {
-                css_provider.load_from_path(this._css_path);
+                css_edges.load_from_path(this._css_path);
 
                 var file = File.new_for_path(this._css_path);
                 file_monitor = file.monitor_file(FileMonitorFlags.NONE);
                 file_monitor.changed.connect(on_css_file_changed);
             } catch (Error e) {
                 warning("Error loading CSS from path: %s", e.message);
-                load_default_css(css_provider);
+                load_default_css(css_edges);
             }
         } else {
-            load_default_css(css_provider);
+            load_default_css(css_edges);
         }
 
         WayLauncherStyleProvider.add_style_context(
             Gdk.Display.get_default(),
-            css_provider,
+            css_edges,
             Gtk.STYLE_PROVIDER_PRIORITY_USER
         );
     }
 
-    private void load_default_css(Gtk.CssProvider css_provider) {
-        css_provider.load_from_resource("io/github/trbjo/bobdock/Application.css");
+    private void load_default_css(Gtk.CssProvider css_edges) {
+        css_edges.load_from_resource("io/github/trbjo/bobdock/Application.css");
     }
 
     private void on_css_file_changed(File file, File? other_file, FileMonitorEvent event_type) {
@@ -234,8 +257,9 @@ public class AppSettings : GLib.Object {
         update_css_sheet();
         update_dock_apps();
         update_dock_folders();
-        update_icon_size_range();
+        update_icon_size_range_from_settings();
         update_spread_factor();
+        update_hover_label_max_length();
         update_scale_speed();
     }
 
@@ -264,47 +288,74 @@ public class AppSettings : GLib.Object {
         edge = (GtkLayerShell.Edge)_edge;
     }
 
+    private bool arrays_equal(string[] arr1, string[] arr2) {
+        if (arr1 == null || arr2 == null)
+            return arr1 == arr2;
+        if (arr1.length != arr2.length)
+            return false;
+        for (int i = 0; i < arr1.length; i++) {
+            if (arr1[i] != arr2[i])
+                return false;
+        }
+        return true;
+    }
+
     private string[] _dock_apps;
     public string[] dock_apps {
         get { return _dock_apps; }
         set {
-            if (_dock_apps != value) {
-                _dock_apps = value;
-                settings.set_strv("apps", value);
+            var unique_apps = remove_duplicates(value);
+            if (unique_apps.length == 0) {
+                unique_apps = get_default_apps();
+            }
+            if (!arrays_equal(_dock_apps, unique_apps)) {
+                _dock_apps = unique_apps;
                 dock_apps_changed();
+                settings.set_strv("apps", unique_apps);
             }
         }
+    }
+
+    protected void update_dock_apps() {
+        dock_apps = settings.get_strv("apps");
+    }
+
+    public signal void dock_apps_changed();
+
+    private string[] remove_duplicates(string[] array) {
+        var hash = new GLib.HashTable<string, bool>(str_hash, str_equal);
+        string[] unique = {};
+
+        foreach (var item in array) {
+            if (!hash.contains(item)) {
+                hash.insert(item, true);
+                unique += item;
+            }
+        }
+        return unique;
     }
 
     private string[] _dock_folders;
     public string[] dock_folders {
         get { return _dock_folders; }
         set {
-            if (_dock_folders != value) {
-                _dock_folders = value;
-                settings.set_strv("folders", value);
+            var unique_folders = remove_duplicates(value);
+            if (unique_folders.length == 0) {
+                unique_folders = get_default_folders();
+            }
+
+            if (!arrays_equal(_dock_folders, unique_folders)) {
+                _dock_folders = unique_folders;
                 dock_folders_changed();
+                settings.set_strv("folders", unique_folders);
             }
         }
     }
 
     public signal void dock_folders_changed();
-    public signal void dock_apps_changed();
-
-    protected void update_dock_apps() {
-        _dock_apps = settings.get_strv("apps");
-        if (_dock_apps.length == 0) {
-            _dock_apps = get_default_apps();
-            settings.set_strv("apps", _dock_apps);
-        }
-    }
 
     protected void update_dock_folders() {
-        _dock_folders = settings.get_strv("folders");
-        if (_dock_folders.length == 0) {
-            _dock_folders = get_default_folders();
-            settings.set_strv("folders", _dock_folders);
-        }
+        dock_folders = settings.get_strv("folders");
     }
 
     private string[] get_default_apps() {
@@ -352,9 +403,10 @@ public class AppSettings : GLib.Object {
     public GLib.List<AppItem> get_app_items() {
         GLib.List<AppItem> items = new GLib.List<AppItem>();
         foreach (string app_id in _dock_apps) {
-            string? file_info = Utils.find_desktop_file(app_id, "");
-            if (file_info != null) {
-                items.append(new AppItem(new DesktopAppInfo.from_filename(file_info)));
+            string file_info = Utils.find_desktop_file(app_id, "") ?? "";
+            var dai = new DesktopAppInfo.from_filename(file_info);
+            if (dai != null) {
+                items.append(new AppItem(dai, true));
             }
         }
         return items;

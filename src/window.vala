@@ -1,23 +1,13 @@
 public class DockWindow : Gtk.Window {
-    private ContentPopOver content_popover;
+    // window class that mostly acts as a controller
+    private PopupManager popup_manager;
     private Dock dock;
 
-    private Gtk.GestureDrag drag_gesture;
-    private Gtk.DragSource dock_item_source;
-    private Gtk.GestureClick click_controller;
+    private Gtk.GestureDrag dock_drag;
     private Gtk.EventControllerMotion motion_controller;
+    private Gtk.DragSource dock_item_source;
 
     private Gtk.GestureLongPress long_press;
-
-    private bool _is_long_pressed;
-    private bool is_long_pressed {
-        get {
-            _is_long_pressed = _is_long_pressed && long_press.get_current_button() != 0;
-            return _is_long_pressed;
-        }
-    }
-
-
 
     private static Gtk.CssProvider css_provider;
     private static AppSettings settings;
@@ -25,304 +15,210 @@ public class DockWindow : Gtk.Window {
     static construct {
         settings = AppSettings.get_default();
         css_provider = new Gtk.CssProvider();
+        PopupManager.get_default();
     }
-
-
-    unowned DockItem? hovered_widget = null;
-    private unowned FolderItem? _current_folder = null;
-    unowned FolderItem? current_folder {
-        get {
-            return _current_folder;
-        }
-        set {
-            if (value != _current_folder) {
-                if (_current_folder != null) {
-                    _current_folder.unset_state_flags(Gtk.StateFlags.SELECTED);
-                }
-                _current_folder = value;
-                if (_current_folder != null) {
-                    _current_folder.set_state_flags(Gtk.StateFlags.SELECTED, true);
-                }
-            }
-        }
-    }
-
 
     public DockWindow(Gtk.Application app, IDesktopConnector conn) {
         Object(application: app);
-        conn.apps_changed.connect(dock.set_window_items);
-    }
-
-    public string gtk_ls_to_string() {
-        switch (settings.edge) {
-            case GtkLayerShell.Edge.LEFT:
-                return "left";
-            case GtkLayerShell.Edge.RIGHT:
-                return "right";
-            case GtkLayerShell.Edge.TOP:
-                return "top";
-            case GtkLayerShell.Edge.ENTRY_NUMBER:
-            case GtkLayerShell.Edge.BOTTOM:
-            default:
-                return "bottom";
-        }
+        conn.apps_changed.connect(dock.update_window_items);
     }
 
     construct {
         title = "BobDock";
         decorated = false;
         resizable = false;
-        css_classes = {gtk_ls_to_string(), "first-render", "hidden"};
+        css_classes = {Utils.gtk_ls_to_string(settings.edge), "first-render", "hidden"};
 
         setup_layer_shell();
 
-        content_popover = new ContentPopOver();
-        content_popover.set_parent(this);
-
+        popup_manager = PopupManager.get_default();
 
         dock = new Dock();
-        this.set_child(dock);
+        child = dock;
 
-        dock.background.secondary_size_changed.connect(() => {
-            correct_hidden_margin();
-            correct_exclusive_zone();
-        });
-
-        setup_controllers();
-        setup_drag_handler();
-
-        settings.scale_factor_changed.connect((scale) => {
-            if (content_popover.visible || !motion_controller.contains_pointer || is_long_pressed) {
-                return;
-            }
-            dock.on_max_scale_changed(scale);
-        });
-
-        settings.dock_folders_changed.connect(() => dock.add_folder_items(settings.get_folder_items()));
         dock.add_folder_items(settings.get_folder_items());
-
-        settings.dock_apps_changed.connect(() => dock.app_items_changed(settings.get_app_items()));
         dock.app_items_changed(settings.get_app_items());
 
-        settings.layershell_edge_change.connect((new_direction) => {
-            content_popover.set_position(Utils.orientation_to_position(new_direction));
-            update_edge_anchors();
-        });
-        content_popover.set_position(Utils.orientation_to_position(settings.edge));
-
-        dock.scaled_up.connect(() => {
-            adjust_hover_label(hovered_widget);
-        });
-
-        map.connect(() => {
-            update_edge_anchors();
-
-            // this is run right after we get the first margin
-            run_layout(this, () => {
-                correct_hidden_margin();
-            });
-
-            // this is run after the first paint
-            run_after_paint(this, () => {
-                set_auto_hide(settings.auto_hide);
-                settings.autohide_changed.connect(set_auto_hide);
-                remove_css_class("first-render");
-            });
-        });
+        unowned Gtk.Widget win_as_widget = ((Gtk.Widget)this);
+        setup_drag_handler(win_as_widget);
+        setup_controllers(win_as_widget);
+        connect_signals();
     }
 
-    private void setup_controllers () {
-        motion_controller = new Gtk.EventControllerMotion();
-        motion_controller.leave.connect((motion) => dock.scale_down());
-        motion_controller.set_propagation_limit(Gtk.PropagationLimit.SAME_NATIVE);
-        motion_controller.motion.connect((motion, x, y) => {
-            double _x = settings.edge == GtkLayerShell.Edge.BOTTOM ? x : dock.bg_inner_size() / 2.0;
-            double _y = settings.edge == GtkLayerShell.Edge.BOTTOM ? dock.bg_inner_size() / 2.0 : y;
+    private void setup_controllers(Gtk.Widget widget_controller) {
+        popup_manager.popup_opened.connect((dock_item) => {
+            this.add_css_class("popover-open");
+            set_active_controller(DockWindow.Controller.POPUP, widget_controller);
+            dock_item.set_state_flags(Gtk.StateFlags.SELECTED, false);
+        });
+        popup_manager.popup_closed.connect(() => {
+            this.remove_css_class("popover-open");
+            set_active_controller(DockWindow.Controller.MOTION, widget_controller);
+        });
 
-            unowned Gtk.Widget? picked_widget = dock.pick(_x, _y, Gtk.PickFlags.DEFAULT);
-            hovered_widget = (picked_widget is DockItem) ? (DockItem)picked_widget : null;
-            if (content_popover.visible || is_long_pressed || dock_item_source.is_active()) {
-                return;
-            }
+        motion_controller = new Gtk.EventControllerMotion();
+        motion_controller.set_propagation_limit(Gtk.PropagationLimit.SAME_NATIVE);
+        motion_controller.leave.connect(() => {
+            set_active_controller(DockWindow.Controller.HOVER_LEAVE, widget_controller);
+        });
+        motion_controller.motion.connect((motion, x, y) => {
             dock.request_motion(settings.edge == GtkLayerShell.Edge.BOTTOM ? x : y);
         });
+        widget_controller.add_controller(motion_controller);
 
-        ((Gtk.Widget)this).add_controller(motion_controller);
-
-        click_controller = new Gtk.GestureClick();
-        click_controller.released.connect((n_press, x, y) => {
-            if (is_long_pressed) {
-                click_controller.set_state(Gtk.EventSequenceState.DENIED);
-                return;
-            }
-
-            if (hovered_widget == null) {
-                return;
-            }
-
-            if ((!(hovered_widget is FolderItem))) {
-                content_popover.popdown();
-            }
-
-            if (!hovered_widget.visible) {
-                hovered_widget = (DockItem)hovered_widget.get_next_sibling();
-            }
-
-            if (!(hovered_widget is FolderItem)) {
-                current_folder = null;
-                hovered_widget.handle_click();
-                return;
-            }
-
-            unowned FolderItem fi = (FolderItem)hovered_widget;
-            if (current_folder == fi && content_popover.visible) {
-                content_popover.popdown();
-                current_folder = null;
-                dock.scale_up();
-            } else {
-                bool bottom = settings.edge == GtkLayerShell.Edge.BOTTOM;
-                bool left = settings.edge == GtkLayerShell.Edge.LEFT;
-
-                Graphene.Rect bounds;
-                fi.compute_bounds(this, out bounds);
-                float start = bottom ? bounds.origin.x + bounds.size.width / 2.0f : bounds.origin.y + bounds.size.height / 2.0f;
-
-                int _x = bottom ? (int)start : left ? dock.bg_inner_size() -1 : 1;
-                int _y = bottom ? 1 : (int)start;
-                content_popover.open_popup(fi, (int)_x, (int)_y);
-                current_folder = fi;
-            }
-        });
-        ((Gtk.Widget)this).add_controller(click_controller);
-
-        content_popover.notify["visible"].connect(() => {
-            if (content_popover.visible) {
-                this.add_css_class("popover-open");
-                dock.scale_down();
-            } else {
-                this.remove_css_class("popover-open");
-                dock.queue_resize();
-            }
-        });
-
-
-
-        var scroll_controller = new Gtk.EventControllerScroll(Gtk.EventControllerScrollFlags.VERTICAL);
+        var scroll_controller = new Gtk.EventControllerScroll(Gtk.EventControllerScrollFlags.VERTICAL | Gtk.EventControllerScrollFlags.HORIZONTAL);
         scroll_controller.scroll.connect((dx, dy) => {
-            if (!content_popover.visible) {
+            if ((popup_manager.in_popup_mode() || has_flags(this, Gtk.StateFlags.DROP_ACTIVE))) {
+                return false;
+            }
+            if (dx.abs() > dy.abs()) {
+                settings.min_icon_size += (dx < 0 ? -1 : 1);
+            } else {
                 settings.max_icon_size += (dy < 0 ? -1 : 1);
             }
             return true;
         });
 
-        ((Gtk.Widget)this).add_controller(scroll_controller);
+        widget_controller.add_controller(scroll_controller);
 
         var dock_item_target = new Gtk.DropTarget(typeof(Gtk.Widget), Gdk.DragAction.COPY);
         var file_drop_target = new Gtk.DropTarget(typeof(File), Gdk.DragAction.COPY);
 
-        dock_item_target.enter.connect(drop_enter_widget);
-        file_drop_target.enter.connect(drop_enter_file);
+        file_drop_target.enter.connect((target, x, y) => drop_setup(widget_controller, target, drop_enter_file));
+        dock_item_target.enter.connect((target, x, y) => drop_setup(widget_controller, target, drop_enter_widget));
 
-
-        dock_item_target.motion.connect((target, x, y) => {
-            double _x = settings.edge == GtkLayerShell.Edge.BOTTOM ? x : dock.bg_inner_size() / 2;
-            double _y = settings.edge == GtkLayerShell.Edge.BOTTOM ? dock.bg_inner_size() / 2 : y;
-
-            unowned Gtk.Widget? picked_widget = dock.pick(_x, _y, Gtk.PickFlags.DEFAULT);
-
-            hovered_widget = (picked_widget is DockItem) ? (DockItem)picked_widget : null;
-            adjust_hover_label(hovered_widget);
-
-            return drop_motion(picked_widget, x, y, dock);
-        });
-        file_drop_target.motion.connect((target, x, y) => {
-            double _x = settings.edge == GtkLayerShell.Edge.BOTTOM ? x : dock.bg_inner_size() / 2;
-            double _y = settings.edge == GtkLayerShell.Edge.BOTTOM ? dock.bg_inner_size() / 2 : y;
-
-            unowned Gtk.Widget? picked_widget = dock.pick(_x, _y, Gtk.PickFlags.DEFAULT);
-            hovered_widget = (picked_widget is DockItem) ? (DockItem)picked_widget : null;
-            adjust_hover_label(hovered_widget);
-
-            return drop_motion(picked_widget, x, y, dock);
-        });
+        file_drop_target.motion.connect(file_drop_motion);
+        dock_item_target.motion.connect(widget_drop_motion);
 
         file_drop_target.drop.connect(drop_file);
         dock_item_target.drop.connect(drop_widget);
 
-        dock_item_target.leave.connect(drop_leave);
-        file_drop_target.leave.connect(drop_leave);
-        ((Gtk.Widget)this).add_controller(dock_item_target);
-        ((Gtk.Widget)this).add_controller(file_drop_target);
+        file_drop_target.leave.connect(() => {
+            set_active_controller(DockWindow.Controller.DROP_LEAVE, widget_controller);
+        });
+
+        dock_item_target.leave.connect(() => {
+            widget_controller.unset_state_flags(Gtk.StateFlags.PRELIGHT);
+        });
+
+        widget_controller.add_controller(dock_item_target);
+        widget_controller.add_controller(file_drop_target);
 
         dock_item_source = new Gtk.DragSource();
         dock_item_source.prepare.connect((source_origin, x, y) => {
-            if (is_long_pressed) {
-                dock_item_source.set_state(Gtk.EventSequenceState.DENIED);
-                return null;
-            }
-            dock_item_source.set_state(Gtk.EventSequenceState.CLAIMED);
-            var fixed_widget = source_origin.get_widget();
-
-            unowned MouseAble? picked_widget = get_focused_item(fixed_widget, x,y);
-            if (picked_widget == null) {
-                return null;
-            }
-
-            if (picked_widget is DockItem) {
-                fixed_widget.set_data<DockItem>("dragged-item", (DockItem)picked_widget);
-                return new Gdk.ContentProvider.for_value(fixed_widget);
+            unowned Item? item = item_under_cursor(x, y);
+            if (item != null) {
+                dock_item_source.set_state(Gtk.EventSequenceState.CLAIMED);
+                if (!item.movable) {
+                    return null;
+                }
+                // set_active_controller(Controller.ITEM, widget_controller);
+                if (item.is_drag_source()) {
+                    item.add_css_class("dragging");
+                    widget_controller.set_data<Item>("dragged-item", item);
+                    item.set_state_flags(Gtk.StateFlags.SELECTED, true);
+                    var paintable = Icon.retrieve_paintable(this, item.icon.icon_name, dock.current_max_size);
+                    // var paintable = new Gtk.WidgetPaintable(item.icon);
+                    source_origin.set_icon(paintable, paintable.get_intrinsic_width()/2, paintable.get_intrinsic_height()/2);
+                } else {
+                    this.get_surface().set_cursor(new Gdk.Cursor.from_name("not-allowed", null));
+                }
+                return new Gdk.ContentProvider.for_value(widget_controller);
             } else {
+                set_active_controller(Controller.MOTION, widget_controller);
                 return null;
             }
         });
 
-
-        dock_item_source.drag_begin.connect((source_origin, drag) => {
-            var fixed_widget = source_origin.get_widget();
-            var app_item = fixed_widget.get_data<DockItem>("dragged-item");
-
-            var paintable = new Gtk.WidgetPaintable (app_item);
-            source_origin.set_icon(paintable, 0, 0);
-        });
 
         dock_item_source.drag_end.connect((source_origin, drag, delete_data) => {
+            Item drop_source = source_origin.get_widget().get_data<Item>("dragged-item");
             source_origin.get_widget().set_data("dragged-item", null);
+            dock_item_source.set_icon(null, 0, 0);
+            set_active_controller(Controller.MOTION, widget_controller);
+
+            if (drop_source == null) {
+                return;
+            }
+
+            drop_source.remove_css_class("dragging");
+            drop_source.remove_css_class("moved-backward");
+            drop_source.remove_css_class("moved-forward");
+            drop_source.queue_resize();
+            if (drop_source.get_type() == FolderItem.TYPE) {
+                string[] folders = {};
+                dock.foreach_folder((folder) => {
+                    folders += folder.user_id;
+                });
+                settings.dock_folders = folders;
+            } else if (drop_source.get_type() == AppItem.TYPE) {
+                string[] apps = {};
+                dock.foreach_app((app) => {
+                    if (app.pinned) {
+                        apps+=app.user_id;
+                    }
+                });
+                settings.dock_apps = apps;
+            }
         });
 
         dock_item_source.drag_cancel.connect((source_origin, drag, reason) => {
+            set_active_controller(Controller.MOTION, widget_controller);
             return false;
         });
 
-        ((Gtk.Widget)this).add_controller(dock_item_source);
+        widget_controller.add_controller(dock_item_source);
     }
 
-    public delegate void Action();
-    public void run_after_paint(Gtk.Widget widget, owned Action action) {
-        ulong id = 0;
-        id = widget.get_frame_clock().after_paint.connect_after(() => {
-            widget.get_frame_clock().disconnect(id);
-            action();
+    private void connect_signals() {
+        dock.background.secondary_size_changed.connect(() => {
+            correct_hidden_margin();
+            correct_exclusive_zone();
+        });
+
+        settings.sizes_changed.connect(dock.sizes_changed);
+        settings.dock_folders_changed.connect(() => dock.add_folder_items(settings.get_folder_items()));
+        settings.dock_apps_changed.connect(() => dock.app_items_changed(settings.get_app_items()));
+        settings.layershell_edge_change.connect(() => update_edge_anchors());
+
+        map.connect(() => {
+            // ensure all subscribing members get the updated edge:
+            settings.layershell_edge_change(settings.edge);
+
+            // this is run right after we get the first margin
+            ulong layout_id = 0;
+            layout_id = this.get_frame_clock().layout.connect(() => {
+                this.get_frame_clock().disconnect(layout_id);
+                correct_hidden_margin();
+            });
+
+            // this is run after the first paint
+            ulong after_paint_id = 0;
+            after_paint_id = this.get_frame_clock().after_paint.connect_after(() => {
+                this.get_frame_clock().disconnect(after_paint_id);
+                set_auto_hide(settings.auto_hide);
+                settings.autohide_changed.connect(set_auto_hide);
+                remove_css_class("first-render");
+            });
+        });
+
+        this.notify["scale-factor"].connect_after(() => {
+            Idle.add(() => {
+                update_edge_anchors();
+                return false;
+            });
         });
     }
-    public void run_layout(Gtk.Widget widget, owned Action action) {
-        ulong id = 0;
-        id = widget.get_frame_clock().layout.connect(() => {
-            widget.get_frame_clock().disconnect(id);
-            action();
-        });
-    }
 
-    public unowned MouseAble? get_focused_item(Gtk.Widget widget, double x, double y) {
-        double _x = settings.edge == GtkLayerShell.Edge.BOTTOM ? x : (double)get_width() / 2.0;
-        double _y = settings.edge == GtkLayerShell.Edge.BOTTOM ? ((double)get_height()) / 2.0 : y;
-
-        var picked_widget = widget.pick(_x, _y, Gtk.PickFlags.DEFAULT);
-        if (picked_widget is MouseAble) {
-            return ((MouseAble)picked_widget);
+    private unowned Item? item_under_cursor(double x, double y, Gtk.PickFlags flags = Gtk.PickFlags.DEFAULT) {
+        double _x = settings.edge == GtkLayerShell.Edge.BOTTOM ? x : dock.bg_outer_size() / 2.0;
+        double _y = settings.edge == GtkLayerShell.Edge.BOTTOM ? dock.bg_outer_size() / 2.0 : y;
+        unowned Gtk.Widget? picked_widget = this.pick(_x, _y, flags);
+        if (picked_widget != null && picked_widget is Icon) {
+            return (Item)(picked_widget.get_parent());
         }
         return null;
     }
-
 
     private void update_edge_anchors() {
         GtkLayerShell.set_anchor(this, GtkLayerShell.Edge.LEFT, settings.edge == GtkLayerShell.Edge.LEFT);
@@ -354,8 +250,9 @@ public class DockWindow : Gtk.Window {
     }
 
     private void correct_hidden_margin() {
-        int margin = dock.bg_inner_size();
-        string css = get_css_for_edge(margin, settings.edge);
+        int margin = dock.background.last_size;
+        string edge_class = Utils.gtk_ls_to_string(settings.edge);
+        var css = "window.%s.hidden #dock { margin-%s: -%ipx; }".printf(edge_class, edge_class, margin);
         css_provider.load_from_string(css);
         WayLauncherStyleProvider.add_style_context(
             Gdk.Display.get_default(),
@@ -373,41 +270,26 @@ public class DockWindow : Gtk.Window {
         }
     }
 
-    private void setup_drag_handler() {
+    private void setup_drag_handler(Gtk.Widget widget_controller) {
         double start_x = 0;
         double start_y = 0;
 
+        bool _is_long_pressed = false;
 
-        drag_gesture = new Gtk.GestureDrag();
+        dock_drag = new Gtk.GestureDrag();
+        widget_controller.add_controller(dock_drag);
         long_press = new Gtk.GestureLongPress();
+        widget_controller.add_controller(long_press);
+
         long_press.pressed.connect((x, y) => {
+            if (popup_manager.in_popup_mode()) {
+                return;
+            }
+
+            set_active_controller(Controller.DOCK, widget_controller);
             _is_long_pressed = true;
-            drag_gesture.drag_begin(x, y);
-        });
-
-        long_press.cancelled.connect(() => {
-            _is_long_pressed = false;
-        });
-        ((Gtk.Widget)this).add_controller(long_press);
-
-
-
-        drag_gesture.set_propagation_phase(Gtk.PropagationPhase.CAPTURE);
-        drag_gesture.drag_begin.connect((x, y) => {
-            if (!is_long_pressed) {
-                return;
-            }
-
-            if (content_popover.visible) {
-                drag_gesture.set_state(Gtk.EventSequenceState.DENIED);
-                return;
-            }
-
-            this.set_state_flags(Gtk.StateFlags.DROP_ACTIVE, false);
-
             Gdk.Rectangle? rect = Utils.get_current_display_size(this);
             if (rect == null) return;
-            dock.scale_down();
 
             if (settings.edge == GtkLayerShell.Edge.RIGHT) {
                 start_x = rect.width - (get_width() - x);
@@ -419,15 +301,12 @@ public class DockWindow : Gtk.Window {
             } else {
                 start_y = y;
             }
-
-            drag_gesture.set_state(Gtk.EventSequenceState.CLAIMED);
-            this.get_surface().set_cursor(new Gdk.Cursor.from_name("grab", null));
         });
 
         double threshold = 0.2;
 
-        drag_gesture.drag_update.connect((x, y) => {
-            if (!is_long_pressed) {
+        dock_drag.drag_update.connect((x, y) => {
+            if (!_is_long_pressed) {
                 return;
             }
             Gdk.Rectangle? rect = Utils.get_current_display_size(this);
@@ -451,36 +330,102 @@ public class DockWindow : Gtk.Window {
             }
         });
 
-        drag_gesture.drag_end.connect((x, y) => {
-            _is_long_pressed = false;
-            this.unset_state_flags(Gtk.StateFlags.DROP_ACTIVE);
-
-            drag_gesture.set_state(Gtk.EventSequenceState.DENIED);
-            this.get_surface().set_cursor(new Gdk.Cursor.from_name("default", null));
+        dock_drag.drag_end.connect((x, y) => {
+            if(_is_long_pressed) {
+                _is_long_pressed = false;
+                set_active_controller(Controller.MOTION, widget_controller);
+            }
          });
-        ((Gtk.Widget)this).add_controller(drag_gesture);
     }
 
-    public void adjust_hover_label(DockItem? hovered) {
-        if (hovered == null || hovered.label == "" || (content_popover.visible && (get_state_flags() & Gtk.StateFlags.DROP_ACTIVE) == 0) || dock.current_scale != settings.max_scale) {
-            // TODO: Add hover label
-            return;
-        }
+    public enum Controller {
+        MOTION,
+        ITEM,
+        DOCK,
+        POPUP,
+        DROP_LEAVE,
+        HOVER_LEAVE,
+    }
 
-        Graphene.Rect bounds;
-        hovered.compute_bounds(this, out bounds);
-        int x = 0;
-        int y = 0;
-        if (settings.edge == GtkLayerShell.Edge.BOTTOM) {
-            x = (int)(bounds.origin.x + (bounds.size.width)/2.0);
-            y = 0;
-        } else if (settings.edge == GtkLayerShell.Edge.RIGHT) {
-            x = 0;
-            y = (int)(bounds.origin.y + (bounds.size.height)/2.0);
-        } else if (settings.edge == GtkLayerShell.Edge.LEFT) {
-            x = (int)bounds.size.width;
-            y = (int)(bounds.origin.y + (bounds.size.height)/2.0);
+    private void set_active_controller(Controller controller, Gtk.Widget widget_controller) {
+        // message("controller: %s", controller.to_string());
+
+        switch (controller) {
+            case DROP_LEAVE:
+                popup_manager.handle_hover_leave();
+                dock.scale_down();
+                items_unset_state_flags(Gtk.StateFlags.DROP_ACTIVE | Gtk.StateFlags.INSENSITIVE);
+                widget_controller.unset_state_flags(Gtk.StateFlags.DROP_ACTIVE);
+                // dock.splitter.visible = false;
+                break;
+            case HOVER_LEAVE:
+                dock.scale_down();
+                popup_manager.handle_hover_leave();
+                break;
+            case POPUP:
+                dock_drag.set_state(Gtk.EventSequenceState.DENIED);
+                dock_item_source.set_state(Gtk.EventSequenceState.DENIED);
+
+                dock_drag.set_propagation_phase(Gtk.PropagationPhase.NONE);
+                dock_item_source.set_propagation_phase(Gtk.PropagationPhase.NONE);
+                motion_controller.set_propagation_phase(Gtk.PropagationPhase.NONE);
+
+                items_unset_state_flags(Gtk.StateFlags.ACTIVE | Gtk.StateFlags.SELECTED | Gtk.StateFlags.DROP_ACTIVE | Gtk.StateFlags.INSENSITIVE | Gtk.StateFlags.BACKDROP);
+                dock.scale_down();
+                break;
+            case MOTION:
+                dock.sensitive = true;
+                dock_drag.set_state(Gtk.EventSequenceState.DENIED);
+                dock_item_source.set_state(Gtk.EventSequenceState.DENIED);
+
+                dock_drag.set_propagation_phase(Gtk.PropagationPhase.BUBBLE);
+                dock_item_source.set_propagation_phase(Gtk.PropagationPhase.BUBBLE);
+                motion_controller.set_propagation_phase(Gtk.PropagationPhase.BUBBLE);
+
+                items_unset_state_flags(Gtk.StateFlags.ACTIVE | Gtk.StateFlags.SELECTED | Gtk.StateFlags.DROP_ACTIVE | Gtk.StateFlags.INSENSITIVE | Gtk.StateFlags.BACKDROP);
+                this.get_surface().set_cursor(new Gdk.Cursor.from_name("default", null));
+
+                widget_controller.unset_state_flags(Gtk.StateFlags.DROP_ACTIVE);
+                // popup_manager.handle_hover_leave();
+                break;
+            case ITEM:
+                dock_drag.set_state(Gtk.EventSequenceState.DENIED);
+                dock_item_source.set_state(Gtk.EventSequenceState.CLAIMED);
+
+                dock_drag.set_propagation_phase(Gtk.PropagationPhase.NONE);
+                dock_item_source.set_propagation_phase(Gtk.PropagationPhase.CAPTURE);
+                motion_controller.set_propagation_phase(Gtk.PropagationPhase.NONE);
+                break;
+            case DOCK:
+                dock.sensitive = false;
+                dock.scale_down();
+                popup_manager.handle_hover_leave();
+
+                this.get_surface().set_cursor(new Gdk.Cursor.from_name("grab", null));
+
+                dock_drag.set_state(Gtk.EventSequenceState.CLAIMED);
+                dock_item_source.set_state(Gtk.EventSequenceState.DENIED);
+
+                dock_drag.set_propagation_phase(Gtk.PropagationPhase.CAPTURE);
+                dock_item_source.set_propagation_phase(Gtk.PropagationPhase.NONE);
+                motion_controller.set_propagation_phase(Gtk.PropagationPhase.NONE);
+                break;
         }
+    }
+
+    private void items_unset_state_flags(Gtk.StateFlags flags) {
+        dock.foreach_item((item) => {
+            item.unset_state_flags(flags);
+        });
+    }
+    private void items_set_state_flags(Gtk.StateFlags flags, bool clear) {
+        dock.foreach_item((item) => {
+            item.set_state_flags(flags, clear);
+        });
+    }
+
+    private bool has_flags(Gtk.Widget widget, Gtk.StateFlags flags) {
+        return (widget.get_state_flags() & flags) != 0;
     }
 
     private void setup_layer_shell() {
@@ -509,44 +454,56 @@ public class DockWindow : Gtk.Window {
         }
     }
 
-    private void drop_leave() {
-        dock.foreach_item((item, i) => {
-            item.unset_state_flags(Gtk.StateFlags.INSENSITIVE);
-        });
-        unset_state_flags(Gtk.StateFlags.PRELIGHT);
-        adjust_hover_label(null);
+    public delegate Gdk.DragAction DropEnterFunc(Gtk.DropTarget drop);
+
+    private Gdk.DragAction drop_setup(Gtk.Widget widget_controller, Gtk.DropTarget target, DropEnterFunc func) {
+        widget_controller.set_state_flags(Gtk.StateFlags.PRELIGHT, false);
+        return func(target);
     }
 
-    private Gdk.DragAction drop_enter_widget(Gtk.DropTarget target, double x, double y) {
-        this.set_state_flags(Gtk.StateFlags.PRELIGHT, false);
-        var drop = target.get_current_drop();
-        if (drop == null) {
-            return 0;
+    private Gdk.DragAction drop_enter_widget(Gtk.DropTarget target) {
+        items_set_state_flags(Gtk.StateFlags.INSENSITIVE | Gtk.StateFlags.BACKDROP, false);
+        var val = target.get_value();
+        if (val != null) {
+            var obj = val.get_object ();
+            if (obj != null && obj is Item) {
+                message("hello");
+            }
         }
+        var drop = target.get_current_drop();
+
+
         var formats = drop.get_formats();
         if (formats.contain_gtype(typeof(Gtk.Widget))) {
-            dock.foreach_item((item, i) => {
-                if ((item is WidgetHandler)) {
-                    item.set_state_flags(Gtk.StateFlags.NORMAL, true);
-                } else {
-                    item.set_state_flags(Gtk.StateFlags.INSENSITIVE, true);
+            drop.read_value_async.begin(typeof(Gtk.Widget), 0, null, (obj, res) => {
+                try {
+                    var value = drop.read_value_async.end(res);
+                    if (value.type() == typeof(Gtk.Widget)) {
+                        Gtk.Widget widget = (Gtk.Widget)value;
+                        Item? dragged_item = widget.get_data<Item>("dragged-item");
+                        if (dragged_item == null) {
+                            return;
+                        }
+                        dock.foreach_item((item) => {
+                            if (item is WidgetHandler && ((WidgetHandler)item).handles_widget(dragged_item)) {
+                                item.unset_state_flags(Gtk.StateFlags.INSENSITIVE);
+                            }
+                        });
+                    }
+                } catch (Error e) {
+                    warning("Error reading drag content: %s", e.message);
                 }
             });
         }
-        return Gdk.DragAction.COPY;
+        return 0;
     }
 
-    private Gdk.DragAction drop_enter_file(Gtk.DropTarget target, double x, double y) {
-        this.set_state_flags(Gtk.StateFlags.PRELIGHT, false);
-
+    private Gdk.DragAction drop_enter_file(Gtk.DropTarget target) {
         var drop = target.get_current_drop();
-        if (drop == null) {
-            return 0;
-        }
 
+        items_set_state_flags(Gtk.StateFlags.INSENSITIVE, false);
         var formats = drop.get_formats();
         if (formats.contain_gtype(typeof(File)) || formats.contain_mime_type("text/uri-list")) {
-
             drop.read_value_async.begin(typeof(File), 0, null, (obj, res) => {
                 try {
                     var value = drop.read_value_async.end(res);
@@ -554,11 +511,9 @@ public class DockWindow : Gtk.Window {
                         File current_drag_file = (File)value;
                         Utils.get_file_mime_type.begin(current_drag_file, (obj, res) => {
                             string? current_drag_mime_type = Utils.get_file_mime_type.end(res);
-                            dock.foreach_item((item, i) => {
+                            dock.foreach_item((item) => {
                                 if (item.can_handle_mime_type(current_drag_file, current_drag_mime_type)) {
-                                    item.set_state_flags(Gtk.StateFlags.NORMAL, true);
-                                } else {
-                                    item.set_state_flags(Gtk.StateFlags.INSENSITIVE, true);
+                                    item.unset_state_flags(Gtk.StateFlags.INSENSITIVE);
                                 }
                             });
                         });
@@ -568,19 +523,16 @@ public class DockWindow : Gtk.Window {
                 }
             });
         }
-        return Gdk.DragAction.COPY;
+        return 0;
     }
 
     private bool drop_widget(Gtk.DropTarget target, Value value, double x, double y) {
-        if (hovered_widget == null) {
+        unowned Item? picked_widget = item_under_cursor(x, y);
+        if (picked_widget == null || !(picked_widget is WidgetHandler)) {
             return false;
         }
 
-        if (!(hovered_widget is WidgetHandler)) {
-            return false;
-        }
-
-        unowned WidgetHandler wh = (WidgetHandler)hovered_widget;
+        unowned WidgetHandler wh = (WidgetHandler)picked_widget;
         if (value.type() == typeof(Gtk.Widget)) {
             Gtk.Widget widget = value as Gtk.Widget;
             if (widget == null) {
@@ -588,36 +540,147 @@ public class DockWindow : Gtk.Window {
                 return false;
             }
 
-            var dock_item = widget.get_data<DockItem>("dragged-item");
-            if (dock_item is DockItem) {
-                return wh.handle_dropped_item(dock_item);
+            var item = widget.get_data<Item>("dragged-item");
+            if (item is Item) {
+                return wh.handle_dropped_item(item);
             }
         }
         return false;
     }
 
     private bool drop_file(Gtk.DropTarget target, Value value, double x, double y) {
-        if (hovered_widget == null) {
-            return false;
-        }
-        if (value.type() == typeof(File)) {
+        var hovered = item_under_cursor(x, y);
+        if (value.type() == typeof(File) && hovered != null) {
             File file = (File)value;
-            return hovered_widget.handle_dropped_file(file);
+            return hovered.handle_dropped_file(file);
         }
         return false;
     }
 
-    private Gdk.DragAction drop_motion(Gtk.Widget? picked_widget, double x, double y, Dock dock) {
-        dock.foreach_visible((item, i) => {
-            if (item != picked_widget) {
-                item.unset_state_flags(Gtk.StateFlags.PRELIGHT);
-            }
-        });
+    private Gdk.DragAction widget_drop_motion(Gtk.DropTarget target, double x, double y) {
+        Item? accepting_widget = item_under_cursor(x, y, Gtk.PickFlags.DEFAULT);
+        Item? hover_item = item_under_cursor(x, y, Gtk.PickFlags.INSENSITIVE);
+        Item drop_source = target.get_widget().get_data<Item>("dragged-item");
 
-        if (picked_widget != null && (picked_widget is DockItem)) {
-            picked_widget.set_state_flags(Gtk.StateFlags.PRELIGHT, true);
+        dock.request_motion(settings.edge == GtkLayerShell.Edge.BOTTOM ? x : y);
+        Gdk.DragAction retval = (accepting_widget != null && accepting_widget is WidgetHandler) ? Gdk.DragAction.COPY : 0;
+        if (hover_item == null || drop_source == hover_item || accepting_widget == drop_source) {
+            return retval;
         }
 
-        return Gdk.DragAction.COPY;
+        var window = target.get_widget();
+        Graphene.Rect hover_bounds, drop_bounds, drop_size, hover_size;
+        hover_item.compute_bounds(window, out hover_bounds);
+        hover_item.compute_bounds(hover_item, out hover_size);
+        drop_source.compute_bounds(window, out drop_bounds);
+        drop_source.compute_bounds(drop_source, out drop_size);
+
+        dock.foreach_item((item) => {
+            if (accepting_widget == item && item is WidgetHandler) {
+                item.set_state_flags(Gtk.StateFlags.DROP_ACTIVE, false);
+            } else {
+                item.unset_state_flags(Gtk.StateFlags.DROP_ACTIVE);
+            }
+        });
+        bool is_left_half = true;
+        bool is_far_enough = false;
+
+        if (!hover_item.movable) {
+            return retval;
+        }
+
+        double hover_origin = settings.edge == GtkLayerShell.Edge.BOTTOM ? hover_bounds.origin.x : hover_bounds.origin.y;
+        double drop_origin = settings.edge == GtkLayerShell.Edge.BOTTOM ? drop_bounds.origin.x : drop_bounds.origin.y;
+
+
+        // Calculate the distance between the cursor and the center of the drop_source
+        if (settings.edge == GtkLayerShell.Edge.BOTTOM) {
+            double drop_source_reference;
+            if (drop_origin < hover_origin) {
+                // drop_source is to the left of hover_item
+                drop_source_reference = drop_origin + drop_bounds.size.width;
+            } else {
+                // drop_source is to the right of hover_item
+                drop_source_reference = drop_origin;
+            }
+            double distance_from_drop_edge = Math.fabs(x - drop_source_reference);
+            is_far_enough = distance_from_drop_edge > (hover_size.size.width / 2);
+
+            double hover_item_center_x = hover_origin + hover_size.size.width / 2;
+            is_left_half = x < hover_item_center_x;
+        } else {
+            double drop_source_reference;
+            if (drop_origin < hover_origin) {
+                // drop_source is to the left of hover_item
+                drop_source_reference = drop_origin + drop_size.size.height;
+            } else {
+                // drop_source is to the right of hover_item
+                drop_source_reference = drop_origin;
+            }
+            double distance_from_drop_edge = Math.fabs(y - drop_source_reference);
+            is_far_enough = distance_from_drop_edge > (hover_size.size.height / 2);
+
+            double hover_item_center_y = hover_origin + hover_size.size.height / 2;
+            is_left_half = y < hover_item_center_y;
+        }
+
+        if (!is_far_enough) {
+            return retval;
+        }
+
+        Type hovered_type = hover_item.get_type();
+
+        bool is_folder = drop_source.get_type() == FolderItem.TYPE;
+        bool folder_drag = is_folder && hovered_type == FolderItem.TYPE;
+        bool app_drag = !is_folder && hovered_type == AppItem.TYPE;
+
+        if (!app_drag && !folder_drag) {
+            return retval;
+        }
+
+        if (hover_origin < drop_origin) {
+            Gtk.Widget end = drop_source.get_next_sibling();
+
+            Gtk.Widget start = hover_item;
+            if (!is_left_half) {
+                start = start.get_next_sibling();
+            }
+            drop_source.insert_before(dock, start);
+
+            while (start != end) {
+                start.add_css_class("moved-forward");
+                start.remove_css_class("moved-backward");
+                start = start.get_next_sibling();
+            }
+
+        } else if (hover_origin > drop_origin) {
+            Gtk.Widget start = drop_source.get_prev_sibling();
+
+            Gtk.Widget end = hover_item;
+            if (is_left_half && start != dock.background) {
+                end = end.get_prev_sibling();
+            }
+            drop_source.insert_after(dock, end);
+            while (start != end) {
+                end.add_css_class("moved-backward");
+                end.remove_css_class("moved-forward");
+                end = end.get_prev_sibling();
+            }
+        }
+        return retval;
+    }
+
+    private Gdk.DragAction file_drop_motion(double x, double y) {
+        var hovered = item_under_cursor(x, y);
+        dock.request_motion(settings.edge == GtkLayerShell.Edge.BOTTOM ? x : y);
+
+        dock.foreach_item((item) => {
+            if (item == hovered) {
+                item.set_state_flags(Gtk.StateFlags.DROP_ACTIVE, false);
+            } else {
+                item.unset_state_flags(Gtk.StateFlags.DROP_ACTIVE);
+            }
+        });
+        return hovered == null ? 0 : Gdk.DragAction.COPY;
     }
 }

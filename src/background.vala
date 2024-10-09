@@ -6,27 +6,20 @@ public class Background : Gtk.Widget {
         settings =  AppSettings.get_default();
     }
 
-    protected class Padding : Gtk.Widget {
-        construct {
-            css_classes = {"dock-item"};
-        }
-    }
-
-    public Gtk.Image image_size { get; construct; }
-    public Padding padding { get; construct; }
-
     construct {
         name = "background";
         can_target = false;
-
-        image_size = new Gtk.Image();
-        image_size.set_parent(this);
-
-        padding = new Padding();
-        padding.set_parent(this);
+        can_focus = false;
     }
 
-    public int last_size { get; private set; default = 0; }
+    public int last_size {
+        get {
+            return settings.edge == GtkLayerShell.Edge.BOTTOM ? last_height : last_width;
+        }
+    }
+
+    private int last_height;
+    private int last_width;
     public signal void secondary_size_changed();
 
     public override void size_allocate(int width, int height, int baseline) {
@@ -34,11 +27,12 @@ public class Background : Gtk.Widget {
 
         int size = settings.edge == GtkLayerShell.Edge.BOTTOM ? height : width;
         if (last_size != size) {
+            last_height = height;
+            last_width = width;
             secondary_size_changed();
-            last_size = size;
         }
     }
 
-
     public override void snapshot(Gtk.Snapshot snapshot) { }
+
 }

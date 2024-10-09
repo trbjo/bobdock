@@ -17,12 +17,18 @@
       <summary>Whether BobDock autohides</summary>
       <description>If true, BobDock will automatically hide when not in use.</description>
     </key>
+    <key name="hover-label-max-length" type="i">
+      <default>-1</default>
+      <summary>Hover label maximum length</summary>
+      <description>BobDock truncates the title at this length. Set to -1 for no truncation, set to 0 to disable hover label</description>
+    </key>
     <key name="spread-factor" type="d">
       <default>2.0</default>
       <summary>Spread factor</summary>
       <description>The size of the magnification spread.</description>
     </key>
     <key name="scale-speed" type="i">
+      <range min="0" max="3000"/>
       <default>150</default>
       <summary>Scale speed</summary>
       <description>The time in milliseconds it takes to scale up the dock.</description>
@@ -43,7 +49,7 @@
       <description>List of folder URIs to be shown in BobDock.</description>
     </key>
     <key name="icon-size-range" type="(ii)">
-      <description>Icons will be scaled between these two pixel sizes. Must be between 16 and 512</description>
+      <description>Icons will be scaled between these two pixel sizes. Must be between 16 and 256</description>
       <default>(48, 128)</default>
     </key>
   </schema>

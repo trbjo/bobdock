@@ -6,8 +6,5 @@ After=graphical-session.target
 Type=exec
 ExecStart=bobdock
 
-Environment=GSK_RENDERER=gl # alternative renderers: gl, ngl, vulkan
-Environment=GDK_BACKEND=wayland
-
 [Install]
 WantedBy=graphical-session.target

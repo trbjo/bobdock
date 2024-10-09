@@ -1,151 +1,136 @@
 public class Dock : Gtk.Widget {
     private const double MIN_SCALE = 1.0;
 
-    private static AppSettings settings = AppSettings.get_default();
+    private static AppSettings settings;
 
-    public Background background { get; construct; }
-    private Splitter splitter;
-    private TrashItem trash;
+    static construct {
+        settings = AppSettings.get_default();
+    }
 
-    public delegate void ItemFunc(DockItem item, int index);
-    public delegate void AppFunc(AppItem item, int index);
-    public delegate void FolderFunc(FolderItem item, int index);
-    public delegate void WindowFunc(WindowItem item, int index);
+    public Background background;
+    public Splitter splitter;
+    public TrashItem trash;
 
-    public signal void scaled_up();
+    public delegate void ItemFunc(Item item);
+    public delegate void AppFunc(AppItem item);
+    public delegate void FolderFunc(FolderItem item);
+    public delegate void ItemIterator(ItemFunc item_func);
 
     private uint animation_callback_id = 0;
 
-    public double current_scale = 1.0;
+    private int _current_icon_size;
+    public int current_max_size {
+        get { return _current_icon_size.clamp(settings.min_icon_size, settings.max_icon_size); }
+        private set {
+            _current_icon_size = value.clamp(settings.min_icon_size, settings.max_icon_size);
+        }
+    }
 
     construct {
+        current_max_size = settings.min_icon_size;
         name = "dock";
 
         background = new Background();
         background.set_parent(this);
 
-        splitter = new Splitter();
-        trash = new TrashItem();
-        splitter.set_parent(this);
-        trash.set_parent(this);
-
-        trash.dock_item_removed.connect(remove);
+        splitter = new Splitter(this);
         splitter.folder_dropped.connect(add_folder_item);
+
+        trash = TrashItem.create();
+        if (trash != null) {
+            trash.set_parent(this);
+            trash.dock_item_removed.connect(remove);
+        }
     }
 
-    public int foreach_visible(ItemFunc func) {
-        int visible_count = 0;
+    private Gtk.Widget first_visible_item() {
         unowned Gtk.Widget child = background.get_next_sibling();
         while (child != null) {
-            unowned Gtk.Widget next = child.get_next_sibling();
             if (child.visible) {
-                func(((DockItem)child), visible_count++);
+                return child;
             }
-            child = next;
+            child = child.get_next_sibling();
         }
-        return visible_count;
+        error("Dock does not have any visible childen, cannot continue");
     }
 
-    public int foreach_app_item(AppFunc func) {
+    public void sizes_changed(int old_min, int old_max) {
+        if (old_min == current_max_size) {
+            current_max_size = settings.min_icon_size;
+        } else if (old_max == current_max_size) {
+            current_max_size = settings.max_icon_size;
+        }
+        foreach_item((item) => {
+            item.queue_resize();
+        });
+        queue_resize();
+    }
+
+    public int foreach_app(AppFunc func) {
         int app_count = 0;
         unowned Gtk.Widget child = background.get_next_sibling();
-        while (child != splitter) {
+        while (child.get_type() == AppItem.TYPE) {
             unowned Gtk.Widget next = child.get_next_sibling();
-            if (child.get_type() == app_type) {
-                func(((AppItem)child), app_count++);
-            }
+            func((AppItem)child);
             child = next;
         }
         return app_count;
     }
 
-    public int foreach_window_item(WindowFunc func) {
-        int win_count = 0;
-        unowned Gtk.Widget child = background.get_next_sibling();
-        while (child != splitter) {
-            unowned Gtk.Widget next = child.get_next_sibling();
-            if (child.get_type() == window_type) {
-                func(((WindowItem)child), win_count++);
-            }
-            child = next;
-        }
-        return win_count;
-    }
-
-    public int foreach_folder_item(FolderFunc func) {
+    public int foreach_folder(FolderFunc func) {
         int folder_count = 0;
         unowned Gtk.Widget child = splitter.get_next_sibling();
-        while (child != trash) {
+        while (child.get_type() == FolderItem.TYPE) {
             unowned Gtk.Widget next = child.get_next_sibling();
-            func(((FolderItem)child), folder_count++);
+            func((FolderItem)child);
             child = next;
         }
         return folder_count;
     }
 
-    public int foreach_item(ItemFunc func) {
-        int total_count = 0;
-        unowned Gtk.Widget child = background.get_next_sibling();
-        while (child != null) {
-            unowned Gtk.Widget next = child.get_next_sibling();
-            func(((DockItem)child), total_count++);
-            child = next;
-        }
-        return total_count;
-    }
-
-    public int item_count {
-        get {
-            lock(_item_count) {
-                return _item_count;
-            }
+    public void foreach_item(ItemFunc func) {
+        unowned Gtk.Widget child = background;
+        while (child != trash) {
+            child = child.get_next_sibling();
+            func((Item)child);
         }
     }
 
-    private int _item_count = 0;
-    private void rebuild_item_count() {
-        int total = 0;
-        lock(_item_count) {
-            unowned Gtk.Widget child = background.get_next_sibling();
-            while (child != null) {
-                if (child.visible) {
-                    total++;
-                }
-                child = child.get_next_sibling();
-            }
-            _item_count = total;
+    public void foreach_item_rev(ItemFunc func) {
+        unowned Gtk.Widget child = trash;
+        while (child != background) {
+            func((Item)child);
+            child = child.get_prev_sibling();
         }
     }
 
-    private Type app_type = typeof(AppItem);
-    private Type folder_type = typeof(FolderItem);
-    private Type window_type = typeof(WindowItem);
 
-    private void remove(DockItem child) {
+    private void remove(Item item) {
+        var child_type = item.get_type();
+        if (child_type == FolderItem.TYPE) {
+            item.unparent();
         // let's see if we should remove the app_item
-        if (child.get_type() == window_type) {
-            foreach_app_item((item, i) => {
-                if (item.hash == child.hash) {
+        } else if (child_type == AppItem.TYPE) {
+            unowned AppItem app = (AppItem)item;
+            if (app.pinned) {
+                app.pinned = false;
+                if (app.window_info == null) {
                     item.unparent();
-                    return;
                 }
-            });
-        } else {
-            child.unparent();
+            }
         }
         rebuild_dock_items();
-        rebuild_item_count();
     }
 
 
     public void rebuild_dock_items() {
         var applist = new GLib.List<string>();
         var folder_list = new GLib.List<string>();
-        foreach_item((item, i) => {
-            if (item.get_type() == app_type) {
-                applist.append(item.user_identification);
-            } else if (item.get_type() == folder_type) {
-                folder_list.append(item.user_identification);
+        foreach_item((item) => {
+            if (item.get_type() == AppItem.TYPE) {
+                applist.append(((AppItem)item).user_id);
+            } else if (item.get_type() == FolderItem.TYPE) {
+                folder_list.append(((FolderItem)item).user_id);
             }
         });
         if (applist.length() > 0) {
@@ -168,101 +153,82 @@ public class Dock : Gtk.Widget {
     }
 
     public void add_folder_items(GLib.List<FolderItem> folders) {
-        int changes = 0;
         folders.foreach((folder) => {
-            changes += add_folder_item(folder);
+            add_folder_item(folder);
         });
 
-        if (changes != 0) {
-            rebuild_item_count();
-        }
     }
 
     public void app_items_changed(GLib.List<AppItem> new_apps) {
-        int changes = foreach_app_item((app, i) => {
-            app.unparent();
+        var winfos = new HashTable<uint?, AppItem>(int_hash, int_equal);
+        new_apps.foreach((app) => {
+            winfos.set(app.hash, app);
         });
 
-        var app_map = new HashTable<uint?, unowned AppItem>(int_hash, int_equal);
+        // we need to ensure all unpinned apps are at the beginning of the dock.
+        Gtk.Widget last_pinned = background;
+
+        foreach_app((app) => {
+            if(app.pinned) {
+                var new_app = winfos.get(app.hash);
+                if (new_app == null) {
+                    app.unparent();
+                } else {
+                    app.insert_after(this, last_pinned);
+                    winfos.remove(app.hash);
+                }
+            } else {
+                app.insert_after(this, background);
+            }
+            last_pinned = app;
+        });
 
         new_apps.foreach((app) => {
-            app.insert_before(this, splitter);
-            app_map.set(app.hash, app);
-        });
-
-        // then reorder window items.
-        foreach_window_item((win, i) => {
-            var app = app_map.get(win.hash);
-            if (app == null) {
-                win.insert_after(this, background);
-            } else {
-                win.insert_after(this, app);
-                app.visible = false;
+            if (winfos.get(app.hash) != null) {
+                app.insert_after(this, last_pinned);
+                last_pinned = app;
             }
-            // todo: are the pointers in the linked list changed during looping?
         });
 
-
-        if (changes != new_apps.length()) {
-            rebuild_item_count();
-        }
     }
 
-    public void on_max_scale_changed(double scale) {
-        if (current_scale != scale) {
-            current_scale = scale;
-            queue_resize();
-        }
-    }
-
-
-    private int add_folder_item(FolderItem child) {
+    private int add_folder_item(FolderItem new_folder) {
         bool is_unique = true;
-        foreach_folder_item((folder, index) => {
-            if (folder.hash == child.hash) {
+        foreach_folder((folder) => {
+            if (folder.hash == new_folder.hash) {
                 is_unique = false;
             }
         });
         if (is_unique) {
-            child.insert_before(this, trash);
+            new_folder.insert_before(this, trash);
             return 1;
         }
         return 0;
     }
 
-    public void set_window_items(GLib.HashTable<uint?, unowned WindowItem> window_map) {
-        var app_map = new HashTable<uint?, unowned AppItem>(int_hash, int_equal);
-
-        foreach_app_item((app, i) => {
-            app_map.set(app.hash, app);
-            if (app.hash in window_map) {
-                var win = window_map.get(app.hash);
-                if (win.get_parent() == null) {
-                    win.insert_after(this, app);
-                    app.visible = false;
-                }
-            }
+    public void update_window_items(GLib.HashTable<uint?, unowned WindowInfo> window_map) {
+        foreach_app((container) => {
+            var is_open_info = window_map.get(container.hash);
+            container.update_window_info(is_open_info);
+            window_map.remove(container.hash);
         });
 
-
-        foreach_window_item((item, i) => {
-            if (!(item.hash in window_map)) {
-                var app = app_map.get(item.hash);
-                app.visible = true;
-                item.unparent();
-                rebuild_item_count();
-            }
-        });
-
-        // add the remaining
         window_map.foreach((key, win) => {
-            if (win.get_parent() == null) {
-                win.insert_after(this, background);
-                // win.animate_icon(true, null);
+            string path = Utils.find_desktop_file(win.app_id, win.title) ?? "";
+            var dai = new DesktopAppInfo.from_filename(path);
+            if (dai != null) {
+                var app = new AppItem(dai, false);
+                app.update_window_info(win);
+                app.insert_after(this, background);
             }
         });
 
-        rebuild_item_count();
+        foreach_app((container) => {
+            if (!container.open && !container.pinned) {
+                container.unparent();
+            }
+
+        });
     }
 
     public void scale_up() {
@@ -283,19 +249,35 @@ public class Dock : Gtk.Widget {
     }
 
     private bool scaling_up = true;
+    private double _scale_accumulator = 0.0;
 
     private bool animate_tick(Gtk.Widget widget, Gdk.FrameClock frame_clock) {
-        var monitor = Gdk.Display.get_default().get_monitor_at_surface(get_root().get_surface());
-        double scale_delta = settings.max_scale - MIN_SCALE;
-
-        current_scale += scale_delta / (settings.scale_speed * monitor.refresh_rate / 1000.0) * (scaling_up ? 1 : -1);
-        current_scale = current_scale.clamp(MIN_SCALE, settings.max_scale);
-
-        if (current_scale >= settings.max_scale || current_scale <= MIN_SCALE) {
+        var surf = get_root().get_surface();
+        if (surf == null) {
             animation_callback_id = 0;
+            return false;
+        }
+        var monitor = Gdk.Display.get_default().get_monitor_at_surface(surf);
+        double refresh_rate = ((double)monitor.refresh_rate) / 1000.0;
+        int icon_size_delta = settings.max_icon_size - settings.min_icon_size;
+
+        double size_change = (icon_size_delta / (settings.scale_speed * refresh_rate)) * (scaling_up ? 1 : -1);
+        _scale_accumulator += size_change;
+
+        int pixel_change = (int)Math.round(_scale_accumulator);
+        if (pixel_change != 0) {
+            current_max_size += pixel_change;
+            _scale_accumulator -= pixel_change;
+
+            current_max_size = current_max_size.clamp(settings.min_icon_size, settings.max_icon_size);
+
+            if (current_max_size >= settings.max_icon_size || current_max_size <= settings.min_icon_size) {
+                animation_callback_id = 0;
+                _scale_accumulator = 0.0; // Reset accumulator when animation ends
+            }
+            queue_resize();
         }
 
-        queue_resize();
         return animation_callback_id != 0;
     }
 
@@ -303,257 +285,199 @@ public class Dock : Gtk.Widget {
 
     public void request_motion(double outside_pos) {
         last_cursor = outside_pos;
-        if (current_scale != settings.max_scale) {
+        if (current_max_size != settings.max_icon_size) {
             scale_up();
         } else {
             queue_resize();
         }
     }
 
-
-    private void set_icon_targets(double baseline_percentage, double for_scale, int ideal_size_for_scale, int base_size) {
-        int accumulated_sizes = 0;
-        List<unowned DockItem> item_list = new List<unowned DockItem>();
-
-        double spread_inverse = 100.0 / settings.spread_factor;
-        double scale_factor = for_scale - 1.0;
-
-        foreach_visible((item, i) => {
-            double icon_center_percentage = ((double)(i + 0.5)) / ((double)item_count);
-            double distance = icon_center_percentage - baseline_percentage;
-            double item_scale = 1.0 + scale_factor * Math.exp(-distance * distance * spread_inverse);
-
-            int icon_size = (int)Math.floor(base_size * item_scale);
-            item.icon_size = icon_size;
-            accumulated_sizes += icon_size;
-            item_list.append(item);
-        });
-
-        int sizediff = accumulated_sizes - ideal_size_for_scale;
-        int adjustment = sizediff > 0 ? -1 : 1;
-        bool can_distribute = sizediff != 0;
-
-        item_list.sort((a, b) => (a.icon_size - b.icon_size));
-        while (can_distribute) {
-            can_distribute = false;
-
-            foreach (var item in item_list) {
-                if (sizediff == 0) {
-                    return;
-                }
-
-                if (base_size < item.icon_size) {
-                    item.icon_size += adjustment;
-                    sizediff += adjustment;
-                    can_distribute = true;
-                }
-            }
-        }
-    }
-
-    public delegate Gsk.Transform TransformFunc(int x_size, int y_size);
-
     protected override void measure(Gtk.Orientation orientation, int for_size, out int minimum, out int natural, out int minimum_baseline, out int natural_baseline) {
         natural = minimum = minimum_baseline = natural_baseline = -1;
         Gtk.Orientation orthogonal = settings.edge != GtkLayerShell.Edge.BOTTOM ? Gtk.Orientation.HORIZONTAL : Gtk.Orientation.VERTICAL;
         if (orientation == orthogonal) {
-            int icon_size, bg_size, item_spacing;
-            background.image_size.measure(orientation, -1, out icon_size, null, null, null);
-            background.measure(orientation, -1, out bg_size, null, null, null);
-            background.padding.measure(orientation, -1, out item_spacing, null, null, null);
-            int scaled_icon = (int)Math.round(((double)icon_size)*current_scale) + bg_size + item_spacing;
-            minimum = natural = scaled_icon;
+            int base_dock_padding, splitter_size;
+            background.measure(orthogonal, -1, out base_dock_padding, null, null, null);
+            first_visible_item().measure(orientation, -1, out splitter_size, null, null, null);
+            minimum = natural = current_max_size + splitter_size + base_dock_padding;
         }
     }
 
     public override void size_allocate(int base_width, int base_height, int baseline) {
         bool is_bottom = settings.edge == GtkLayerShell.Edge.BOTTOM;
-        int base_dimension = Utils.round_to_nearest_even((is_bottom ? base_width: base_height) -1);
+        int base_dimension = is_bottom ? base_width: base_height;
 
         Gtk.Orientation parallel = is_bottom ? Gtk.Orientation.HORIZONTAL : Gtk.Orientation.VERTICAL;
-        int primary_min_size = 0;
-        foreach_visible((item, i) => {
+        Gtk.Orientation orthogonal = !is_bottom ? Gtk.Orientation.HORIZONTAL : Gtk.Orientation.VERTICAL;
+
+        int icon_min_sizes = 0;
+        // first pass, find dock minimum size;
+        int[] parallel_array = {};
+        int[] position_array = {};
+        foreach_item((item) => {
             int min;
             item.measure(parallel, -1, out min, null, null, null);
-            primary_min_size+=min;
+            parallel_array += min;
+            position_array += icon_min_sizes;
+            icon_min_sizes += min + settings.min_icon_size;
         });
 
-        double baseline_percentage = calculate_baseline_cursor(last_cursor, primary_min_size, base_dimension);
+        int baseline_pixels = (int)calculate_baseline_pixel_cursor(last_cursor, icon_min_sizes, base_dimension);
+        int cursor_max_size = icon_min_sizes/2;
 
-        int dock_padding;
-        background.measure(parallel, -1, out dock_padding, null, null, null);
+        double current_scale = ((double)current_max_size) / ((double)settings.min_icon_size);
+        double current_scale_factor = current_scale - 1.0;
 
-        int base_size;
-        background.image_size.measure(Gtk.Orientation.HORIZONTAL, -1, out base_size, null, null, null);
-        int padding = (int)Math.round(primary_min_size + dock_padding - item_count*base_size);
+        int[] ortho_size_array = new int[parallel_array.length];
 
-        double nearest_center = get_edge_favoring_icon_percentage(baseline_percentage);
+        double max_sizes = 0;
+        int acc_sizes = 0;
 
-        double max_scale = get_expansion_factor(0.5, current_scale);
-        double ideal_scale = get_expansion_factor(baseline_percentage, current_scale);
-        double extreme_scale = get_expansion_factor(nearest_center, current_scale);
+        double pixel_accumulator = 0;
 
-        ideal_scale = double.max(ideal_scale, extreme_scale);
-        double max_size_for_scale = ((double)base_size) * max_scale;
-        double ideal_size_for_scale = ((double)base_size) * ideal_scale;
-
-        double scale_difference = max_scale - ideal_scale;
-        int deficit = (int)Math.round(((double)base_size) * scale_difference);
-
-        int background_total_size = (int)Math.round(ideal_size_for_scale);
-        if (baseline_percentage > 0.5) {
-            deficit = 0;
+        int direction, i;
+        ItemIterator item_iterator;
+        bool cursor_in_second_half = last_cursor > base_dimension/2;
+        if (cursor_in_second_half) {
+            i = 0;
+            direction = 1;
+            item_iterator = foreach_item;
         } else {
-            background_total_size = (int)Math.round(max_size_for_scale - deficit);
+            direction = -1;
+            item_iterator = foreach_item_rev;
+            i = parallel_array.length - 1;
         }
 
-        set_icon_targets(baseline_percentage, current_scale, background_total_size, base_size);
-        background_total_size += padding;
 
-        int fixed_transform = (int)Math.round((base_dimension - max_size_for_scale - padding)/2.0);
-        int x_offset = is_bottom ? (fixed_transform + deficit) : 0;
-        int y_offset = !is_bottom ? (fixed_transform + deficit) : 0;
+        double spread_pixels = settings.spread_factor * settings.min_icon_size;
+        spread_pixels = 2 * spread_pixels * spread_pixels;
 
-        var rect = new Cairo.Region.rectangle(Cairo.RectangleInt() {
-            x = x_offset,
-            y = y_offset,
-            width = is_bottom ? background_total_size : base_dimension,
-            height = !is_bottom ? background_total_size : base_dimension,
+        // second pass, find actual distance from the cursor.
+        item_iterator((item) => {
+            int pos_start = position_array[i];
+            int min = parallel_array[i];
+            int mid = pos_start + (min+settings.min_icon_size)/2;
+
+            double distance = mid - baseline_pixels;
+            double item_scale = 1.0 + current_scale_factor * Math.exp(-(distance * distance) / spread_pixels);
+
+            double icon_size = settings.min_icon_size * item_scale;
+            int icon_size_int = (int)Math.round(icon_size);
+
+            double icon_size_diff = icon_size - icon_size_int;
+
+            pixel_accumulator += icon_size_diff;
+            int pixel_change = (int)Math.round(pixel_accumulator);
+
+            if (pixel_change != 0) {
+                icon_size_int += pixel_change;
+                pixel_accumulator -= pixel_change;
+            }
+
+            item.icon_size = icon_size_int;
+            parallel_array[i] = icon_size_int + min;
+            acc_sizes += icon_size_int + min;
+
+            int ortho_min;
+            item.measure(orthogonal, -1, out ortho_min, null, null, null);
+            ortho_size_array[i] = ortho_min + icon_size_int;
+
+            double max_distance = mid - cursor_max_size;
+            double max_item_scale = 1.0 + current_scale_factor * Math.exp(-(max_distance * max_distance) / spread_pixels);
+            double max_icon_size = settings.min_icon_size * max_item_scale;
+            max_sizes += max_icon_size + min;
+
+            i += direction;
         });
-        get_root().get_surface().set_input_region(rect);
 
-        TransformFunc trans;
-        Gtk.Orientation orthogonal = !is_bottom ? Gtk.Orientation.HORIZONTAL : Gtk.Orientation.VERTICAL;
-        int base_dock_padding, item_padding;
-        background.measure(orthogonal, -1, out base_dock_padding, null, null, null);
-        background.padding.measure(orthogonal, -1, out item_padding, null, null, null);
-        int secondary_size = base_dock_padding + item_padding + base_size;
+        int dock_width, dock_height, icon_padding;
+        background.measure(Gtk.Orientation.HORIZONTAL, -1, out dock_width, null, null, null);
+        background.measure(Gtk.Orientation.VERTICAL, -1, out dock_height, null, null, null);
+        first_visible_item().measure(orthogonal, -1, out icon_padding, null, null, null);
 
+        dock_height += (is_bottom ? icon_padding + settings.min_icon_size : acc_sizes);
+        dock_width += (is_bottom ? acc_sizes : icon_padding + settings.min_icon_size);
+
+        double translate_down = direction * (max_sizes - acc_sizes);
+
+        float fixed_transform = (float)(base_dimension - (is_bottom ? dock_width : dock_height) - translate_down)/2.0f;
+
+        float x_offset = is_bottom ? fixed_transform : 0;
+        float y_offset = !is_bottom ? fixed_transform : 0;
+        int input_width = is_bottom ? dock_width : base_dimension;
+        int input_height = !is_bottom ? dock_height : base_dimension;
+        input_region(x_offset, y_offset, input_width, input_height);
+
+        var transform = new Gsk.Transform().translate(Graphene.Point() { x = x_offset, y = y_offset });;
         if (is_bottom) {
-            var transform = new Gsk.Transform().translate(Graphene.Point() { x = x_offset, y = base_height - secondary_size });
-            background.allocate(background_total_size, secondary_size, baseline, transform);
-
-            Graphene.Rect bg_margins;
-            background.compute_bounds(background, out bg_margins);
-            x_offset-=(int)bg_margins.origin.x;
-            trans = (x_size, y_size) => {
-                int x = x_offset;
-                x_offset += x_size;
-                return new Gsk.Transform().translate(Graphene.Point() {
-                    x = x,
-                    y = base_height - y_size
-                });
-            };
+            transform = transform.translate(Graphene.Point() { x = 0, y = base_height - dock_height });
         } else if (settings.edge == GtkLayerShell.Edge.RIGHT) {
-            var transform = new Gsk.Transform() .translate(Graphene.Point() { x = base_width - secondary_size, y = y_offset });
-            background.allocate(secondary_size, background_total_size, baseline, transform);
-
-            Graphene.Rect bg_margins;
-            background.compute_bounds(background, out bg_margins);
-            y_offset-=(int)bg_margins.origin.y;
-
-
-            trans = (x_size, y_size) => {
-                int y = y_offset;
-                y_offset += y_size;
-                return new Gsk.Transform().translate(Graphene.Point() {
-                    x = base_width - x_size,
-                    y = y
-                });
-            };
-        } else { // LEFT
-            var transform = new Gsk.Transform().translate(Graphene.Point() { x = 0, y = y_offset });
-            background.allocate(secondary_size, background_total_size, baseline, transform);
-
-            Graphene.Rect bg_margins;
-            background.compute_bounds(background, out bg_margins);
-            y_offset-=(int)bg_margins.origin.y;
-
-            trans = (x_size, y_size) => {
-                int y = y_offset;
-                y_offset += y_size;
-                return new Gsk.Transform().translate(Graphene.Point() {x = 0, y = y });
-            };
+            transform = transform.translate(Graphene.Point() { x = base_width - dock_width, y = 0 });
         }
+        background.allocate(dock_width, dock_height, baseline, transform);
 
-        foreach_visible((item, i) => {
-            int nat_h, nat_v;
-            item.measure(Gtk.Orientation.HORIZONTAL, -1, null, out nat_h, null, null);
-            item.measure(Gtk.Orientation.VERTICAL, -1, null, out nat_v, null, null);
-            item.allocate(nat_h, nat_v, baseline, trans(nat_h, nat_v));
+        Graphene.Rect bg_margins;
+        background.compute_bounds(background, out bg_margins);
+        x_offset -= (int)bg_margins.origin.x;
+        y_offset -= (int)bg_margins.origin.y;
+
+        int j = 0;
+        int[] horiz_array = is_bottom ? parallel_array : ortho_size_array;
+        int[] verti_array = !is_bottom ? parallel_array : ortho_size_array;
+
+        foreach_item((item) => {
+            int horiz = horiz_array[j];
+            int verti = verti_array[j++];
+            if (is_bottom) {
+                item.allocate(horiz, verti, baseline, new Gsk.Transform().translate({ x_offset, base_height - verti }));
+            } else if (settings.edge == GtkLayerShell.Edge.RIGHT) {
+                item.allocate(horiz, verti, baseline, new Gsk.Transform().translate({ base_width - horiz, y_offset }));
+            } else { // LEFT
+                item.allocate(horiz, verti, baseline, new Gsk.Transform().translate({ 0, y_offset }));
+            }
+            x_offset += horiz;
+            y_offset += verti;
         });
-
     }
 
     public override void snapshot(Gtk.Snapshot snapshot) {
-        List<unowned DockItem> visible_items = new List<unowned DockItem>();
+        List<unowned Item> visible_items = new List<unowned Item>();
         snapshot_child(background, snapshot);
-        foreach_visible((item, index) => visible_items.append(item));
+        foreach_item((item) => visible_items.append(item));
         visible_items.sort((a, b) => (a.icon_size - b.icon_size));
         foreach(var child in visible_items) {
             snapshot_child(child, snapshot);
         }
     }
 
-    public double get_expansion_factor(double cursor_percentage, double max_scale) {
-        double spread_inverse = 100.0 / settings.spread_factor;
-        double scale_factor = max_scale - 1.0;
-        double total_factor = 0;
+    private void input_region(float start_x, float start_y, int end_x, int end_y) {
 
-        for (int i = 0; i < item_count; i++) {
-            double distance = ((double)i + 0.5) / item_count - cursor_percentage;
-            total_factor += 1.0 + scale_factor * Math.exp(-distance * distance * spread_inverse);
-        }
+        var rect = new Cairo.Region.rectangle(Cairo.RectangleInt() {
+            x = (int)Math.floor(start_x),
+            y = (int)Math.floor(start_y),
+            width = end_x,
+            height = end_y,
+        });
+        get_root().get_surface().set_input_region(rect);
 
-        return total_factor;
-    }
-
-    public double get_edge_favoring_icon_percentage(double cursor_percentage) {
-        int item_count = this.item_count;
-
-        if (cursor_percentage <= 0.5 / item_count) {
-            return 0.0; // First icon
-        }
-        if (cursor_percentage >= (item_count - 0.5) / item_count) {
-            return 1.0; // Last icon
-        }
-
-        double adjusted_cursor = cursor_percentage * item_count - 0.5;
-
-        int nearest_icon;
-        if (cursor_percentage < 0.5) {
-            nearest_icon = (int)Math.floor(adjusted_cursor);
-        } else {
-            nearest_icon = (int)Math.ceil(adjusted_cursor);
-        }
-
-        return (nearest_icon + 0.5) / item_count;
     }
 
     public int bg_inner_size() {
+        // without margins and border
         return settings.edge == GtkLayerShell.Edge.BOTTOM ? background.get_height() : background.get_width();
     }
 
     public int bg_outer_size() {
+        // with margins and border
         Graphene.Rect bg_margins;
         background.compute_bounds(background, out bg_margins);
         return settings.edge == GtkLayerShell.Edge.BOTTOM ? (int)bg_margins.size.height : (int)bg_margins.size.width;
     }
 
-    public double calculate_baseline_cursor(double raw_cursor, double min_size, double max_size) {
+    public double calculate_baseline_pixel_cursor(double raw_cursor, double min_size, double max_size) {
         double scaling_difference = max_size - min_size;
-
         double unscaled_cursor_position = raw_cursor - (scaling_difference / 2.0);
-
-        double adjusted_cursor_position = 0;
-        if (unscaled_cursor_position <= 0.0) {
-            adjusted_cursor_position = 0;
-        } else if (unscaled_cursor_position >= min_size) {
-            adjusted_cursor_position = 1;
-        } else {
-            adjusted_cursor_position = (unscaled_cursor_position) / min_size;
-        }
-
-        return adjusted_cursor_position;
+        return unscaled_cursor_position;
     }
 }
+

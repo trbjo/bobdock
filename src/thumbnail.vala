@@ -1,11 +1,9 @@
 public class Thumbnails {
     private static Thumbnails? instance = null;
     public static int size { get; private set; }
-    private static Gdk.Paintable checkerboard;
 
     private Thumbnails(string file_attribute) {
         size = get_size_for_attribute(file_attribute);
-        checkerboard = create_checkerboard(size);
     }
 
     public static Thumbnails get_instance(string file_attribute) {
@@ -33,7 +31,11 @@ public class Thumbnails {
         return new ThumbnailContainer(paintable, file, is_thumbnail, scale_factor);
     }
 
-    public class ThumbnailContainer : Gtk.Widget, MouseAble {
+    public class ThumbnailContainer : Gtk.Widget {
+        static construct {
+            set_css_name("thumbnail-container");
+        }
+
         public ThumbnailWidget thumbnail;
         private static int size_at_scale;
         public File file;
@@ -68,7 +70,7 @@ public class Thumbnails {
             return false;
         }
 
-        public bool handle_dropped_item(DockItem item, uint current_drop_target_id) {
+        public bool handle_dropped_item(Item item, uint current_drop_target_id) {
             return false;
         }
 
@@ -94,28 +96,27 @@ public class Thumbnails {
             int child_width, child_height;
             thumbnail.measure(Gtk.Orientation.HORIZONTAL, -1, null, out child_width, null, null);
             thumbnail.measure(Gtk.Orientation.VERTICAL, -1, null, out child_height, null, null);
-            var transform = new Gsk.Transform();
-            double x = 0.0;
-            double y = 0.0;
-            double _child_width = (double)child_width;
-            double _child_height = (double)child_height;
-            if (child_width > child_height) {
-                y = (_child_width - _child_width / thumbnail.aspect_ratio) / 2.0f;
-            } else if (child_width < child_height) {
-                x = (_child_height - _child_height * thumbnail.aspect_ratio) / 2.0f;
-            }
-
             float factor_h = ((float)width) / ((float)child_width);
             float factor_v = ((float)height) / ((float)child_height);
-            float factor = float.min(factor_h, factor_v) ;
+            float factor = float.min(factor_h, factor_v);
 
-            // center the icon in relationship to itself.
+            var transform = new Gsk.Transform();
+
+            float scaled_width = child_width * factor;
+            float scaled_height = child_height * factor;
+            float x = (width - scaled_width) / 2;
+            float y = (height - scaled_height) / 2;
+
+            transform = transform.translate(Graphene.Point() { x = x, y = y });
             transform = transform.scale(factor, factor);
-            transform = transform.translate(Graphene.Point() { x = (float)x, y = (float)y });
             thumbnail.allocate(child_width, child_height, baseline, transform);
         }
 
         public class ThumbnailWidget : Gtk.Widget {
+            static construct {
+                set_css_name("thumbnail-widget");
+            }
+
             public Gdk.Paintable paintable;
             private int width = -1;
             private int height = -1;
@@ -146,10 +147,9 @@ public class Thumbnails {
                 }
 
                 if (thumbnail) {
-                    add_css_class("thumbnail-widget");
+                    add_css_class("image-preview");
                 }
             }
-
 
             public override void measure(Gtk.Orientation orientation, int for_size, out int minimum, out int natural, out int minimum_baseline, out int natural_baseline) {
                 minimum = natural = orientation == Gtk.Orientation.HORIZONTAL ? width : height;
@@ -157,38 +157,8 @@ public class Thumbnails {
             }
 
             public override void snapshot(Gtk.Snapshot snapshot) {
-                snapshot.save();
-                if (is_thumbnail) {
-                    checkerboard.snapshot(snapshot, width, height);
-                }
                 paintable.snapshot(snapshot, width, height);
-                snapshot.restore();
             }
         }
-    }
-
-    private static Gdk.Paintable create_checkerboard(int size_at_scale) {
-        Graphene.Size dimensions = Graphene.Size() {
-           width = size_at_scale,
-           height = size_at_scale
-        };
-        var snapshot = new Gtk.Snapshot();
-        var rect = Graphene.Rect().init(0, 0, size_at_scale, size_at_scale);
-
-        snapshot.append_color(Gdk.RGBA() { red = 0.9f, green = 0.9f, blue = 0.9f, alpha = 0.7f }, rect);
-
-        int tile_size = size_at_scale / 16;
-        for (int y = 0; y < size_at_scale; y += tile_size * 2) {
-            for (int x = 0; x < size_at_scale; x += tile_size * 2) {
-                snapshot.push_clip(Graphene.Rect().init(x, y, tile_size, tile_size));
-                snapshot.append_color(Gdk.RGBA() { red = 0.8f, green = 0.8f, blue = 0.8f, alpha = 0.7f }, rect);
-                snapshot.pop();
-
-                snapshot.push_clip(Graphene.Rect().init(x + tile_size, y + tile_size, tile_size, tile_size));
-                snapshot.append_color(Gdk.RGBA() { red = 0.8f, green = 0.8f, blue = 0.8f, alpha = 0.7f }, rect);
-                snapshot.pop();
-            }
-        }
-        return snapshot.to_paintable(dimensions);
     }
 }

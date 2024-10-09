@@ -107,19 +107,19 @@ public class SwayIPCClient : Object {
             }
 
             uint32 length = *((uint32*)(&header[6]));
-            uint32 message_type = *((uint32*)(&header[10]));
 
-            debug("Received message header: type=%u, length=%u", message_type, length);
+            // uint32 message_type = *((uint32*)(&header[10]));
+            // debug("Received message header: type=%u, length=%u", message_type, length);
 
             Bytes payload_bytes = yield input_stream.read_bytes_async(length, Priority.DEFAULT);
-            debug("Received payload of length %lu", payload_bytes.length);
+            // debug("Received payload of length %lu", payload_bytes.length);
 
             // Create a new array with an extra byte for null termination
             uint8[] payload = new uint8[payload_bytes.length + 1];
             Memory.copy(payload, payload_bytes.get_data(), payload_bytes.length);
             payload[payload_bytes.length] = 0; // Add null terminator
 
-            debug("Added null terminator. New payload length: %lu", payload.length);
+            // debug("Added null terminator. New payload length: %lu", payload.length);
 
             return payload;
         } catch (Error e) {
@@ -223,7 +223,7 @@ public class SwayIPCClient : Object {
         public Rect window_rect;
         public Rect geometry;
         public string layout;
-        public string? name;
+        public string name;
         public int fullscreen_mode;
         public bool sticky;
         public int pid;

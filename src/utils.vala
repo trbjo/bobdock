@@ -1,9 +1,4 @@
 namespace Utils {
-    public int round_to_nearest_even(int number) {
-        return (number + 1) & ~1;
-    }
-
-
     private static void calculate_dimensions(int original_width, int original_height, int max_size, out int new_width, out int new_height) {
         if (original_width > original_height) {
             new_width = max_size;
@@ -116,6 +111,32 @@ namespace Utils {
         }
     }
 
+    public static Gdk.Monitor? get_current_monitor(Gtk.Window window) {
+        unowned Gdk.Surface? surface = window.get_surface();
+        if (surface == null) {
+            return null;
+        }
+        Gdk.Display? display = surface.get_display();
+        if (display == null) {
+            return null;
+        }
+        var monitor = display.get_monitor_at_surface(surface);
+        if (monitor != null) {
+            return monitor;
+        }
+        message("default monitor not found");
+
+        unowned GLib.ListModel monitor_list = display.get_monitors();
+        uint n_monitors = monitor_list.get_n_items();
+
+        if (n_monitors == 0) {
+            message("No monitors found");
+            return null;
+        }
+        return (monitor_list.get_item(0) as Gdk.Monitor);
+
+    }
+
     public static Gdk.Rectangle? get_current_display_size(Gtk.Window window) {
         unowned Gdk.Surface? surface = window.get_surface();
         if (surface == null) {
@@ -153,7 +174,7 @@ namespace Utils {
         return id.has_suffix(".desktop") ? id[0:-8] : id;
     }
 
-    public static string? find_desktop_file(string _app_id, string window_title) {
+    public static string? find_desktop_file(string app_id, string window_title) {
         string[] search_paths = {
             Path.build_filename(Environment.get_home_dir(), ".local", "share", "applications"),
             "/usr/local/share/applications",
@@ -164,12 +185,6 @@ namespace Utils {
         int best_score = -1;
 
 
-
-        // Strip ".desktop" suffix from app_id if present
-        string app_id = _app_id;
-        if (app_id.has_suffix(".desktop")) {
-            app_id = app_id.substring(0, app_id.length - 8);
-        }
 
         foreach (string path in search_paths) {
             try {
@@ -193,7 +208,7 @@ namespace Utils {
             } catch (Error e) { }
         }
 
-        message("returning %s with score: %i", best_match, best_score);
+        // message("returning %s with score: %i", best_match, best_score);
         return best_match;
     }
 
@@ -220,10 +235,10 @@ namespace Utils {
             }
             if (name != null) {
                 if (name.down().contains(app_id.down())) {
-                    score += 3;
+                    score += 0;
                 }
                 if (window_title != "" && name.down().contains(window_title.down())) {
-                    score += 4;
+                    score += 0;
                 }
             }
         } catch (Error e) {
@@ -242,6 +257,22 @@ namespace Utils {
         }
         return false;
     }
+
+    public static string gtk_ls_to_string(GtkLayerShell.Edge edge) {
+        switch (edge) {
+            case GtkLayerShell.Edge.LEFT:
+                return "left";
+            case GtkLayerShell.Edge.RIGHT:
+                return "right";
+            case GtkLayerShell.Edge.TOP:
+                return "top";
+            case GtkLayerShell.Edge.ENTRY_NUMBER:
+            case GtkLayerShell.Edge.BOTTOM:
+            default:
+                return "bottom";
+        }
+    }
+
 
     public static Gtk.Orientation edge_to_orientation(GtkLayerShell.Edge edge) {
         switch (edge) {

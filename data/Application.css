@@ -1,152 +1,125 @@
-window.hidden.first-render #dock {
-    transition: margin 0 linear;
+@define-color mixed_accent_bg mix(black, @theme_selected_bg_color, 0.7);
+@define-color attention_color mix(@error_color, white, 0.4);
+@define-color attention_color #ff3b30;
+
+*:drop(active) {
+    box-shadow: none;
 }
 
-@keyframes marginsRight {
-    0% { margin-left: 0; }
-    10% { margin-left: 60px; }
-    100% { margin-left: 0; }
-}
-@keyframes marginsLeft {
-    0% { margin-right: 0; }
-    10% { margin-right: 60px; }
-    100% { margin-right: 0; }
-}
-@keyframes marginsBottom {
-    0% { margin-top: 0; }
-    10% { margin-top: 60px; }
-    100% { margin-top: 0; }
-}
-
-@keyframes shadowPulse {
-    0% { box-shadow: 0 0 0 rgba(0,0,0,0); }
-    10% { box-shadow: 0 0 50px 0 @theme_selected_bg_color; }
-    100% { box-shadow: 0 0 0 rgba(0,0,0,0); }
+@keyframes shadowPulseBottom {
+    0% {
+        background-image: linear-gradient(to top, rgba(0,0,0,0) 0px, rgba(0,0,0,0) 0);
+        min-height: 0;
+    }
+    10% {
+        background-image: linear-gradient(to top, alpha(@theme_selected_bg_color, 0.4) 0px, transparent 40px);
+        min-height: 40px;
+    }
+    99% {
+        background-image: linear-gradient(to top, rgba(0,0,0,0) 0px, rgba(0,0,0,0) 0);
+        min-height: 0;
+    }
+    100% {
+        background-image: none;
+    }
 }
 
-window.left #background {
-    animation:
-        shadowPulse 3s ease-out forwards,
-        marginsLeft 3s ease-out forwards;
+@keyframes shadowPulseRight {
+    0% {
+        min-width: 0;
+        background-image: linear-gradient(to left, rgba(0,0,0,0) 0px, rgba(0,0,0,0) 0);
+    }
+    10% {
+        background-image: linear-gradient(to left, alpha(@theme_selected_bg_color, 0.4) 0px, transparent 40px);
+        min-width: 40px;
+    }
+    99% {
+        background-image: linear-gradient(to left, rgba(0,0,0,0) 0px, rgba(0,0,0,0) 0);
+        min-width: 0;
+    }
+    100% {
+        background-image: none;
+    }
 }
 
-window.right #background {
-    animation:
-        shadowPulse 3s ease-out forwards,
-        marginsRight 3s ease-out forwards;
-}
-window.bottom #background {
-    animation:
-        shadowPulse 3s ease-out forwards,
-        marginsBottom 3s ease-out forwards;
+@keyframes shadowPulseLeft {
+    0% {
+        background-image: linear-gradient(to right, rgba(0,0,0,0) 0px, rgba(0,0,0,0) 0);
+        min-width: 0;
+    }
+    10% {
+        background-image: linear-gradient(to right, alpha(@theme_selected_bg_color, 0.4) 0px, transparent 40px);
+        min-width: 40px;
+    }
+    99% {
+        background-image: linear-gradient(to right, rgba(0,0,0,0) 0px, rgba(0,0,0,0) 0);
+        min-width: 0;
+    }
+    100% {
+        background-image: none;
+    }
 }
 
-window.first-render #background {
+window.bottom {
+    background-position: bottom;
+    background-repeat: no-repeat;
+    animation: shadowPulseBottom 3s ease-out forwards;
+}
+
+window.right {
+    background-position: right;
+    background-repeat: no-repeat;
+    animation: shadowPulseRight 3s ease-out forwards;
+}
+
+window.left {
+    background-position: left;
+    background-repeat: no-repeat;
+    animation: shadowPulseLeft 3s ease-out forwards;
+}
+
+window.first-render {
     animation: none;
 }
 
-image {
-    transition: -gtk-icon-size 300ms ease-out;
-}
-
-window #dock {
-    transition: margin 300ms ease-out;
-}
-
 window.popover-open #dock,
-window.hidden:hover #dock
+window.hidden:hover #dock,
+window:drop(active) #dock,
+window.hidden:drop(active) #dock
 {
-    margin: 0px;
+    margin: 0;
 }
 
 window.hidden #background {
     background: none;
     border-color: transparent;
-    transition: 0 border-color 240ms, 0 background 240ms;
 }
 
 #background {
     border-style: solid;
     background: alpha(@theme_base_color, 0.9);
     border-color: @borders;
-    transition: 0ms border-color, 0ms background;
-    transition-delay: 0ms;
 }
 
-.dock-item {
-    transition: opacity 200ms, transform 200ms;
-}
-
-window:drop(active) .app-item box,
-window:drop(active) .app-item {
-    transform: scale(1.0);
-}
-
-.app-item box {
-    opacity: 1.0;
-}
-
-window:drop(active):not(:active) .app-item box {
-    opacity: 0.0;
-}
-
-window.left:drop(active):hover .app-item {
+window:hover icon:drop(active),
+window:drop(active) icon:drop(active) {
     transform-origin: center;
 }
 
-window.left:hover .app-item box,
-window.left:hover .app-item {
+window.left:not(:drop(active)) icon:hover {
     transform-origin: left center;
 }
-window.right .app-item box,
-window.right .app-item {
+window.right:not(:drop(active)) icon:hover {
     transform-origin: right center;
 }
 
-window.bottom .app-item box,
-window.bottom .app-item {
+window.bottom:not(:drop(active)) icon:hover {
     transform-origin: bottom center;
 }
 
-.app-item box .dot-indicator,
-.app-item box {
-    transition: transform 100ms cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 200ms ease 200ms;
-}
-window:hover .app-item box .dot-indicator,
-window:hover .app-item box {
-    transition: transform 100ms cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 200ms ease 0;
-}
-.app-item {
-    transition: transform 100ms cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 200ms;
-}
-
-.app-item:active {
+window:hover icon:active {
     transform: scale(0.9);
 }
-
-.app-item:active box {
-    transform: scale(calc(1 / 0.9));
-}
-
-window:drop(active) {
-    border: 0px solid blue;
-    box-shadow: none;
-    margin: 0px;
-}
-
-window.bottom #background { padding: 0 4px; }
-window.left #background, window.right #background { padding: 4px 0; }
-
-
-window.popover-open #background,
-window:hover #background {
-    transition-delay: 0ms;
-    border-color: @borders;
-    background: alpha(@theme_base_color, 0.9);
-}
-
-
-
 
 window.bottom #background {
     border-radius: 10px 10px 0 0;
@@ -163,95 +136,189 @@ window.right #background {
     border-width: 1px 0px 1px 1px;
 }
 
-
-
-.dock-item:disabled {
-    opacity: 0.15;
+window {
+/*    background: alpha(red, 0.2);*/
 }
 
-window:drop(active):not(:active) .dock-item:hover {
-    transform: scale(1.2);
+
+icon,
+#dot-box,
+icon:backdrop:disabled:selected,
+#dot-box:backdrop:disabled:selected
+{
+    opacity: 1.0;
+}
+
+#dot-box:disabled,
+.badge:disabled,
+icon:disabled {
+    opacity: 0.7;
+    filter: grayscale(50%);
+}
+
+/* item is drag source */
+#dot-box:disabled:backdrop:not(:selected),
+icon:disabled:backdrop:not(:selected)
+{
+    filter: grayscale(0%);
+    opacity: 1.0;
 }
 
 scrolledwindow {
     background: @theme_base_color;
-    border: 1px solid alpha(@borders, 0.5);
+    border: 1px solid alpha(@borders, 0.7);
     border-radius: 6px;
-    margin: 5px;
+}
+
+popover.background contents {
+    padding: 0;
+    box-shadow: 0 1px 1px 0px alpha(black, 0.2),
+                0 5px 10px 5px transparent;
 }
 
 arrow {
     background: @theme_bg_color;
+    border-color: @borders;
 }
 
-.background.folder-view contents {
-    background: @theme_bg_color;
-    margin: 0;
-    padding: 0;
-    box-shadow: inset 0 0 0 0px @borders,
+popover.background.open contents {
+    box-shadow: 0 1px 1px 0px transparent,
                 0 5px 10px 5px alpha(black, 0.4);
+    background: @theme_bg_color;
 }
 
-.folder-view .header {
-    font-size: 11pt;
-    margin: 5px 0 0px 0;
-    font-weight: 500;
-}
-
-window.right .dock-item {
-    margin: 0 1px 0 0;
-    padding: 4px 6px 4px 4px;
-}
-
-window.left .dock-item {
-    margin: 0 0 0 1px;
-    padding: 4px 4px 4px 6px;
-}
-
-window.bottom .dock-item {
-    margin: 0 0 1px 0;
-    padding: 2px 4px 6px 4px;
-}
-
-.dock-item:selected {
-    box-shadow: inset 0 0 10px 3px alpha(@theme_selected_bg_color, 0.4);
-    border-radius: 5px;
-}
-
-
-window .dock-item {
-    color: alpha(@theme_text_color, 0.6);
-}
-
-.dock-item .thumbnail-widget {
+label.header {
     margin: 10px;
 }
 
-.background.folder-view flowboxchild {
+popover.background.open box > .header {
+    font-size: 11pt;
+    margin: 6px 0 0 0;
+    font-weight: 500;
+}
+
+window.right icon {
+    padding: 6px 6px 6px 6px;
+}
+
+window.left icon {
+    padding: 6px 3px 6px 7px;
+}
+
+window.bottom icon {
+    padding: 6px 6px 6px 6px;
+}
+
+item.folder icon:not(:selected) {
+    animation: bg-radius-invert 100ms ease-in forwards;
+}
+item.folder icon:selected {
+    animation: bg-radius 100ms ease-out forwards;
+}
+.folder {
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: 100% 100%;
+}
+@keyframes bg-radius {
+    0% {
+        background-image: radial-gradient(circle, alpha(@theme_selected_bg_color, 0.75) 0%, transparent 0%);
+    }
+    100% {
+        background-image: radial-gradient(circle, alpha(@theme_selected_bg_color, 0.75) 68%, transparent 0%);
+    }
+}
+@keyframes bg-radius-invert {
+    0% {
+        background-image: radial-gradient(circle, alpha(@theme_selected_bg_color, 0.75) 68%, transparent 0%);
+    }
+    100% {
+        background-image: radial-gradient(circle, alpha(@theme_selected_bg_color, 0.75) 0%, transparent 0%);
+    }
+}
+
+thumbnail-widget.image-preview,
+.folder > icon > thumbnail-container > thumbnail-widget {
+    margin: 6px;
+}
+icon {
+/*    border: 1px solid red;*/
+}
+icon thumbnail-container:first-child {
+  transform: rotate(10deg) translate(-3px, 1px);
+}
+icon thumbnail-container {
+  transform: rotate(-5deg) translate(0, -1px);
+}
+icon thumbnail-container:last-child {
+  transform: rotate(-10deg) translate(1px, 3px);
+}
+
+
+thumbnail-widget.image-preview {
+    background-color: rgba(205, 205, 205, 0.8);
+    background-image:
+        linear-gradient(45deg, rgba(230, 230, 230, 0.8) 25%, transparent 25%),
+        linear-gradient(-45deg, rgba(230, 230, 230, 0.8) 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, rgba(230, 230, 230, 0.8) 75%),
+        linear-gradient(-45deg, transparent 75%, rgba(230, 230, 230, 0.8) 75%);
+    background-size: 20px 20px;
+    background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+}
+
+
+popover.background contents {
+    margin: 0;
+    padding: 0;
+}
+scrolledwindow  {
+    margin: 6px;
+    min-height: 450px;
+    min-width: 450px;
+}
+
+popover.background flowboxchild {
     margin: 2px;
 }
 
-.thumbnail-widget {
+thumbnail-widget.image-preview {
     outline: 1px solid alpha(@borders, 0.5);
     border-radius: 4px;
-    box-shadow: 0 2px 6px 3px alpha(black, 0.4);
+    box-shadow: 0 1px 5px 1px alpha(black, 0.4);
 }
 
-.badge,
-.dock-item.window-item .badge {
+item.open.app .badge {
     background-color: @theme_selected_bg_color;
 }
-.dock-item.folder-item .badge {
+
+item.folder .badge {
     background-color: @warning_color;
 }
 
-.dock-item .badge {
+item.app .badge {
+/*    background-color: @error_color;*/
+}
+
+item.trash icon:hover .badge {
+    opacity: 1.0;
+}
+item.trash .badge {
+    opacity: 0.0;
+    background-color: @mixed_accent_bg;
+}
+
+.badge {
     border-radius: 50%;
-    font-size: 13px;
-    font-weight: 500;
-    padding: 13px;
+    min-height: 22px;
+    min-width: 22px;
+    font-size: 14px;
+    font-weight: 700;
+    margin: -4px 0 0 -4px;
     color: white;
-    background-color: @error_color;
+    background: @attention_color;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+    /* todo: make this work with custom widgets.   */
+    text-shadow: 1px 1px rgba(0, 0, 0, 0.25);
 }
 
 @keyframes fade-in {
@@ -266,23 +333,92 @@ window .dock-item {
     }
 }
 
+window.left.popover-open #background,
+window.left:drop(active) #background,
+window.left:hover #background {
+    margin-right: 4px;
+}
+
+window.right.popover-open #background,
+window.right:drop(active) #background,
+window.right:hover #background {
+    margin-left: 4px;
+}
+
+window.popover-open #background,
+window:drop(active) #background,
+window:hover #background {
+    box-shadow: 0px 0px 3px 1px rgba(0, 0, 0, 0.15);
+}
+
 .dot-indicator {
-    animation: fade-in 1300ms ease-out;
-    background: alpha(@fg_color, 0.6);
+    animation: fade-in 1s ease-out forwards;
+    background: alpha(@fg_color, 0.35);
     border-radius: 50%;
     min-height: 4px;
     min-width: 4px;
+    transition: background 200ms ease-out;
+}
+
+.dot-indicator:selected {
+    background: alpha(@fg_color, 0.85);
+}
+
+window.right .dot-indicator:first-child,
+window.left .dot-indicator:first-child {
+    margin-top: 1px;
 }
 
 window.left .dot-indicator {
-    margin-top: 1px;
+    margin-bottom: 1px;
+    margin-left: 1px;
 }
 
 window.right .dot-indicator {
     margin-top: 1px;
+    margin-right: 1px;
+}
+
+window.bottom .dot-indicator:first-child {
+    margin-left: 1px;
 }
 window.bottom .dot-indicator {
+    margin-right: 1px;
     margin-bottom: 1px;
-    margin-left: 1px;
+}
+
+window.hidden.first-render #dock {
+    transition: margin 0 linear;
+}
+
+window #dock {
+    transition: margin 300ms ease-out 50ms;
+}
+
+window.popover-open #background,
+window.hidden:hover #background,
+window.hidden:drop(active) #background {
+    transition-delay: 0ms;
+    border-color: @borders;
+    background: alpha(@theme_base_color, 0.9);
+}
+
+window.hidden #background {
+    transition: 0 border-color 240ms, 0 background 240ms;
+}
+
+#background {
+    transition: 0ms border-color, 0ms background;
+    transition-delay: 0ms;
+}
+
+window item.dragging {
+    opacity: 0.0;
+}
+
+#dot-box,
+.badge,
+icon {
+    transition: transform 100ms ease-out, opacity 200ms;
 }
 
